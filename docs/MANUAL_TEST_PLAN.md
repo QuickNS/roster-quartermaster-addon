@@ -1,6 +1,12 @@
 # Compatibility spike manual tests
 
-These tests require the actual Forever client and have **not yet been run**.
+These tests require the actual Forever client. On 2026-10-02, the user reported
+that the supplied installation, diagnostics/rescan, reload, and full-restart
+smoke-test walkthrough passed on client 1.60.1, build 70170, interface 16001.
+No separate results were supplied for the extended cases below, including
+second-character isolation, level-cap behavior, corrupt data, and combat.
+See [BETA_API_NOTES.md](BETA_API_NOTES.md) for the evidence and its limits.
+
 Back up SavedVariables before testing. Do not delete existing user data to
 simulate a clean installation; use a backed-up test profile instead.
 

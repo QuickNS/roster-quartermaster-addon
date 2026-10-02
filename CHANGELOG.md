@@ -10,5 +10,6 @@
   installation/manual-validation documentation.
 - Set interface metadata to `16001` from the user-reported Forever `1.60.1`,
   build `70170` (Oct 1 2026).
-- Addon loading, other live Forever APIs, reload behavior, and full-restart
-  persistence remain unverified.
+- Recorded the user's 2026-10-02 smoke-test pass covering installation,
+  diagnostics/rescan, reload, and full-restart persistence. Detailed API/event
+  results and extended failure cases remain individually unconfirmed.

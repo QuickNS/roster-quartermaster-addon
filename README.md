@@ -15,10 +15,11 @@ Version `0.0.1` implements the **Milestone 0 compatibility spike**, not the MVP:
 - Non-destructive rejection of malformed or unsupported-schema SavedVariables.
 - Mocked boot, reload, persistence, and API failure tests.
 
-**Addon compatibility is not yet verified in-game.** The TOC targets interface
-`16001`, reported from Forever `1.60.1`, build `70170` (Oct 1 2026).
-Addon loading and native persistence across `/reload` and a full client restart
-still need testing. See [beta API notes](docs/BETA_API_NOTES.md) and the
+**The initial in-game smoke tests passed according to the user on 2026-10-02.**
+The TOC targets interface `16001`, reported from Forever `1.60.1`, build `70170`
+(Oct 1 2026). The report covers installation, diagnostics/rescan, `/reload`, and
+full-restart persistence. Detailed API output and extended failure cases have
+not been individually confirmed. See [beta API notes](docs/BETA_API_NOTES.md) and the
 [manual test plan](docs/MANUAL_TEST_PLAN.md).
 
 The roster dashboard, roster linking, migrations, recommendations, offline

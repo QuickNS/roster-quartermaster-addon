@@ -12,9 +12,15 @@ This identifies client version **1.60.1**, build **70170**, build date
 **Oct 1 2026**, and interface **16001**. The TOC now declares that observed
 interface number.
 
-No direct client access was available during implementation. **Addon loading,
-other API behavior, event delivery, reload behavior, and full-restart persistence
-remain unverified.** Mock results must not be recorded as in-client observations.
+Later on 2026-10-02, the user reported: **"everything passed. diag looks fine"**
+after receiving the installation, diagnostics/rescan, `/reload`, and full-restart
+persistence walkthrough. Those smoke tests are recorded as user-reported passes
+on the build above, not as independently observed results.
+
+No diagnostic transcript or separate per-test results were supplied. Individual
+API return values, event delivery details, and extended failure cases remain
+unconfirmed. No direct client access was available during implementation.
+Mock results must not be recorded as in-client observations.
 
 The compatibility probe tests conventional WoW API names with capability checks;
 it does not assert that Forever exposes these APIs unchanged. Calls that throw
@@ -22,6 +28,10 @@ are contained at the adapter boundary and reported by `/rq diag`. Restricted
 return values are rejected when `issecretvalue` is available.
 
 ## Candidate APIs to verify
+
+The overall diagnostic smoke test passed according to the user. `Unverified`
+below means the specific API contract or output has not been supplied or
+individually confirmed; it does not mean the smoke test failed.
 
 | API / global | Candidate shape or use | Status |
 | --- | --- | --- |
@@ -76,13 +86,15 @@ account-wide character records or register roster members.
 | Check | Observed result |
 | --- | --- |
 | Forever version/build/interface | User-reported 2026-10-02: 1.60.1 / 70170 / 16001; build date Oct 1 2026 |
-| Fresh installation and `/rq diag` | Not run |
-| API return types, including no-rested-XP behavior | Not run |
-| Event delivery | Not run |
-| `/reload` with retained account and character markers | Not run |
-| Full exit/restart with retained markers | Not run |
-| Logout timestamp written and retained | Not run |
-| Missing/restricted API behavior in the client | Not run |
+| Installation and `/rq diag` | User-reported pass, 2026-10-02; diagnostics "looks fine" |
+| `/rq rescan` after a state change | Covered by user's overall smoke-test pass; no separate output supplied |
+| API return types, including no-rested-XP behavior | Not individually confirmed |
+| Event delivery | Not individually confirmed |
+| `/reload` with retained account and character markers | Covered by user's overall smoke-test pass; no separate output supplied |
+| Full exit/restart with retained markers | Covered by user's overall smoke-test pass; no separate output supplied |
+| Logout timestamp written and retained | Not individually confirmed |
+| Missing/restricted API behavior in the client | Not individually confirmed |
+| Second-character isolation, level-cap cases, corrupt data, and combat | Extended manual tests not explicitly reported |
 
 If persistence fails, record the exact build and whether the failure occurs on
 reload, clean exit, or both. Do not describe data as durable until tested.
