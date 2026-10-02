@@ -1,7 +1,7 @@
-# SavedVariables schema 4
+# SavedVariables schema 5
 
 `RQDB` is account-wide; `RQCharDB` is per-character. Both declare
-`schemaVersion = 4`. Initialization happens after SavedVariables load.
+`schemaVersion = 5`. Initialization happens after SavedVariables load.
 
 ## Account state
 
@@ -51,12 +51,13 @@ A character record contains:
 
 These are example values, not initialization defaults. Unknown scalar values are
 absent. Planned profession IDs are intentions, not learned profession snapshots.
-Item inventory and recipes remain unknown until their later scanning milestones.
+Bag items and opened profession recipes are observed in schema 5, as described below.
+Bank and mail inventories remain unknown; absent data is not zero stock.
 
 ## Per-character state
 
 `RQCharDB` contains `characterId` plus independent copies of the current record's
-`identity`, `snapshot`, `inventory`, `recipes`, and `restedState`. There are no shared mutable
+`identity`, `snapshot`, `inventory`, `recipes`, `restedState`, and `supplies`. There are no shared mutable
 snapshot tables between the two SavedVariables roots. Unknown extension fields
 from the previous schema are preserved.
 
@@ -103,7 +104,10 @@ If the clock fails, new observations do not inherit an apparently fresh section
 timestamp. Partial section values must not be presented as uniformly current.
 
 `lastSeen` advances at successful capture checkpoints when the clock is available.
-`lastLogout` is set on synchronous logout capture. Pending timer callbacks are
+`lastLogout` is set on synchronous logout capture. If logout progression is unavailable
+or has a zero XP maximum, the remaining API scan is skipped and prior values and
+observation timestamps are preserved; only the logout timestamp advances.
+Pending timer callbacks are
 invalidated on rescan, registration changes, and logout.
 
 The whole-snapshot freshness label is `UNKNOWN` without usable timestamps,
@@ -113,9 +117,9 @@ a money update does not make old profession or bag data current.
 
 ## Migration and corruption handling
 
-`Migrations.Prepare` copies both roots, accepts schema 1, 2, 3, or 4 (or missing version
+`Migrations.Prepare` copies both roots, accepts schemas 1 through 5 (or missing version
 on a partial database), fills absent containers, seeds absent provisional
-configuration, validates shapes/values/link consistency, and stamps schema 4.
+configuration, validates shapes/values/link consistency, and stamps schema 5.
 It is idempotent and preserves unknown fields and non-nil user configuration.
 It does not fabricate an observation timestamp for schema-1 snapshots.
 
@@ -157,7 +161,8 @@ Each character has:
 restedState = {
     calibration = { profile = "", inside = {}, outside = {} },
     -- Optional logout: at, level, xp, xpMax, restedXp, wasResting,
-    --                  multiplier, revision, profile
+    --                  multiplier, revision, profile, cached, observedAt
+    -- Optional logoutReason: explanation when no baseline can be built
     -- Optional comparison: at, accepted, reason, estimated, actual, error, observedRate
 }
 ```
@@ -168,11 +173,19 @@ Calibration records **base** rates; the member multiplier is applied when estima
 Profile changes reset learned rates. Changed global mechanics retain the observed
 baseline for estimates but reject learning across that change.
 
-Only complete progression/rested/location sections observed at the exact logout
-timestamp can create a baseline. A clock failure or incomplete logout removes the
-baseline rather than reusing an old one. Pre-schema-4 snapshots can seed one only
-when these conditions hold and `lastSeen == lastLogout`; schema 4 never recreates
-a consumed baseline during migration.
+Normally, complete progression/rested/location sections observed at the exact logout
+timestamp create a baseline. Since 0.0.6, unavailable/zero-maximum logout progression
+triggers a cached fallback using complete earlier sections. `at` remains the logout
+time; `observedAt` is the oldest required section's actual timestamp, and `cached`
+marks the added uncertainty. Cached baselines are always LOW confidence and cannot
+train rates. Section timestamps are not relabelled as fresh. Missing, incomplete,
+or future-dated required evidence still prevents baseline creation; `logoutReason`
+preserves the explanation. A missing logout clock never reuses an old baseline.
+These optional fields are backward-compatible within schema 4.
+
+Pre-schema-4 snapshots can seed a baseline only from exact logout observations
+with `lastSeen == lastLogout`; schema 4 never recreates a consumed baseline during
+migration, and migration does not invent a cached fallback.
 
 The first successful identity reconciliation of a login starts session history and
 consumes the baseline, comparing newly captured rested XP when available. Learning
@@ -189,3 +202,42 @@ recommendations (ID, score, tier, confidence, two/three reasons, estimate), an e
 slot, estimates keyed by ID, and global warnings. Tiers precede score, then stable
 character ID breaks ties. The planning service supplies API context, text output,
 and persistence orchestration; the Today panel only builds a view model.
+
+## Full names and supplies (schema 5)
+
+`identity.displayName` prefers the unmodified name returned by the client.
+`identity.fullName` is an optional explicit user override. Display/recipient
+selection uses the override first, but GUID identity is never rekeyed by a display
+edit. A name API's realm return is not concatenated as a surname. Fallback IDs use
+the actual API name, not planned labels; unavailable unmodified names cannot
+establish a surname, so `/rq fullname` and reportable API evidence remain available.
+
+`inventory.bags.items[itemId] = count` stores bag totals. `tradable[itemId]` counts
+only explicitly unbound, unlocked stacks. `details[itemId]` optionally stores name,
+class and subclass IDs; `equipped[bagIndex]` stores regular equipped bag sizes.
+Empty/malformed/failed scans retain old counts, mark the source incomplete and
+save `error`; incomplete sources cannot supply mail allocations. Bank/mail are
+untouched. Bag counts are not scanned during final logout teardown.
+
+`recipes.professions[professionId]` holds `{name, complete, scannedAt, recipes}`.
+Each recipe ID maps to `{name, learned, reagents, reagentsComplete, skillUps,
+source?, sourceItem?}`. `reagents[itemId]` contains per-craft quantities. Required
+slots with alternative reagent choices are explicitly incomplete rather than
+choosing a quality/currency/item arbitrarily. A learning-item mapping requires one
+unique acquisition-linked item identified as a recipe by the item API; currencies
+and ambiguous alternatives are not selected. Opening one profession never marks all professions known;
+the outer `recipes.complete` remains false. No shared/guild catalog is recorded as
+the player's learned list.
+
+`supplies.needs[itemId]` is a configured minimum stock target.
+`supplies.goals[professionId] = {recipeId, targetSkill}` is the selected recipe for
+a skill goal. Estimated crafts are `ceil(max(0, targetSkill - observedSkill) /
+skillUps)`. Reagent requirements sum across goals, then combine with manual stock
+targets by maximum, not addition. This is an estimate: skill-ups can fail. No
+optimal Forever guide or acquisition location is invented.
+
+Groceries and mail proposals are computed, not persisted. Bag stock subtracts from
+targets; stale/incomplete evidence stays visible. Sender reserves and each proposal
+decrease the available allocation pool, with stable destination and item-ID order.
+Mail/in-transit inventory is unknown and not credited. Proposals do not execute any
+protected action or edit the client mail form. Manual review remains required.

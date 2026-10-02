@@ -11,7 +11,7 @@ local function tableField(parent, key, path, default)
 end
 
 local function validateIdentity(identity)
-    for _, field in ipairs({ "guid", "displayName", "realm", "class", "race" }) do
+    for _, field in ipairs({ "guid", "displayName", "fullName", "realm", "class", "race" }) do
         if identity[field] ~= nil and not RQ.Util.IsText(identity[field]) then
             return false
         end
@@ -135,6 +135,10 @@ local function prepareRecord(record, path)
         return nil, path .. ": " .. restedError .. " Original data preserved."
     end
     record.restedState = restedState
+    local suppliesOk, suppliesError = RQ.SuppliesConfig.Prepare(record)
+    if not suppliesOk then
+        return nil, path .. ": " .. suppliesError .. " Original data preserved."
+    end
     return record
 end
 
@@ -149,6 +153,7 @@ local function root(value, label)
         and value.schemaVersion ~= 2
         and value.schemaVersion ~= 3
         and value.schemaVersion ~= 4
+        and value.schemaVersion ~= 5
     then
         return nil, label .. " has an unsupported schema; original data preserved."
     end

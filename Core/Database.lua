@@ -69,8 +69,13 @@ function Database.Attach(identity)
             inventory = matching and RQ.Util.Copy(RQCharDB.inventory) or RQ.Snapshot.NewInventory(),
             recipes = matching and RQ.Util.Copy(RQCharDB.recipes) or RQ.Snapshot.EmptySource(),
             restedState = matching and RQ.Util.Copy(RQCharDB.restedState) or RQ.PlanningConfig.PrepareState(nil),
+            supplies = matching and RQ.Util.Copy(RQCharDB.supplies) or { needs = {}, goals = {} },
             registration = RQDB.roster[id] and "member" or "pending",
         }
+        local ok, err = RQ.SuppliesConfig.Prepare(record)
+        if not ok then
+            return nil, err
+        end
         RQDB.characters[id] = record
     end
     for key, value in pairs(identity) do
@@ -85,6 +90,7 @@ function Database.Attach(identity)
     RQCharDB.inventory = RQ.Util.Copy(record.inventory)
     RQCharDB.recipes = RQ.Util.Copy(record.recipes)
     RQCharDB.restedState = RQ.Util.Copy(record.restedState)
+    RQCharDB.supplies = RQ.Util.Copy(record.supplies)
     Database.activeId = id
     Database.NotifyChanged()
     return record, nil, id
@@ -95,6 +101,20 @@ function Database.Current()
         return nil
     end
     return RQDB.characters[Database.activeId]
+end
+
+function Database.SetFullName(name)
+    local record = Database.Current()
+    if not record then
+        return false, "Current character unavailable; use /rq rescan."
+    end
+    if not RQ.Util.IsText(name) or #name > 128 or name:find("[%c|]") then
+        return false, "Enter the full character name without chat markup (maximum 128 bytes)."
+    end
+    record.identity.fullName = name:match("^%s*(.-)%s*$")
+    RQCharDB.identity.fullName = record.identity.fullName
+    Database.NotifyChanged()
+    return true
 end
 
 function Database.SaveSnapshot(snapshot)
@@ -291,6 +311,27 @@ function Database.SaveWindowPosition(position)
     return true
 end
 
+function Database.SaveLogistics(id, field, value)
+    if not Database.initialized or not id or not RQDB.characters[id] then
+        return false, "Character record unavailable."
+    end
+    if field ~= "inventory" and field ~= "recipes" and field ~= "supplies" then
+        return false, "Invalid logistics field."
+    end
+    local candidate = RQ.Util.Copy(RQDB.characters[id])
+    candidate[field] = RQ.Util.Copy(value)
+    local ok, err = RQ.SuppliesConfig.Prepare(candidate)
+    if not ok then
+        return false, err
+    end
+    RQDB.characters[id][field] = candidate[field]
+    if id == Database.activeId then
+        RQCharDB[field] = RQ.Util.Copy(candidate[field])
+    end
+    Database.NotifyChanged()
+    return true
+end
+
 function Database.SaveRestedState(id, state)
     if not Database.initialized or not RQDB.characters[id] then
         return false, "Character record unavailable."
@@ -338,9 +379,10 @@ function Database.ResolveMember(query)
         local entry = member(id)
         if entry then
             local identity = RQDB.characters[id].identity
-            local full = identity.displayName and identity.realm and (identity.displayName .. "-" .. identity.realm)
-            for _, name in pairs({ identity.displayName, full, entry.plannedName }) do
-                if name:lower() == normalized then
+            local name = RQ.Character.DisplayName(identity)
+            local full = name and identity.realm and (name .. "-" .. identity.realm)
+            for _, candidate in pairs({ name, identity.displayName, full, entry.plannedName }) do
+                if candidate:lower() == normalized then
                     matches[#matches + 1] = id
                     break
                 end

@@ -67,6 +67,9 @@ end
 
 local function onEvent(event, argument)
     RQ.Api.MarkEventObserved(event)
+    if event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_LIST_UPDATE" then
+        RQ.SuppliesService.QueueRecipes()
+    end
     if event == "ADDON_LOADED" then
         if argument == RQ.name then
             RQ.Database.Initialize()
@@ -79,7 +82,13 @@ local function onEvent(event, argument)
         ensureMinimapButton()
         RQ.Api.Print("Roster ready. Click the RQ minimap button or use /rq; /rq diag shows API status.")
     elseif event == "PLAYER_LOGOUT" then
+        RQ.SuppliesService.Cancel()
         RQ.SnapshotService.Logout()
+    elseif event == "TRADE_SKILL_CLOSE" then
+        RQ.SuppliesService.Cancel()
+    elseif event == "MAIL_SHOW" then
+        RQ.SuppliesService.ScanBags()
+        RQ.Api.Print("Manual mail suggestions available with /rq mail. No items are attached or sent automatically.")
     elseif event == "PLAYER_ENTERING_WORLD" then
         ensureMinimapButton()
         if RQ.Database.initialized then
@@ -89,6 +98,7 @@ local function onEvent(event, argument)
     elseif event == "PLAYER_REGEN_DISABLED" then
         RQ.Api.HideRegistrationPrompt()
         RQ.Api.HideRosterWindow()
+        RQ.Api.HideCopyWindow()
     elseif event == "PLAYER_REGEN_ENABLED" then
         showRegistration()
     elseif eventSections[event] then
@@ -105,6 +115,33 @@ RQ.Api.RegisterSlashCommand(function(message)
         openDashboard(nil, true)
     elseif command == "diag" then
         RQ.Diagnostics.Report()
+    elseif command == "copy" then
+        RQ.Diagnostics.Copy()
+    elseif command == "fullname" then
+        configurationResult(RQ.Database.SetFullName(argument))
+    elseif command == "supplies" then
+        if argument == "" then
+            openDashboard("supplies")
+        else
+            RQ.SuppliesService.Open(argument)
+        end
+    elseif command == "recipes" then
+        RQ.SuppliesService.Open(argument, true)
+    elseif command == "scan-recipes" then
+        local record = RQ.Database.Current()
+        if not record or record.registration == "ignored" then
+            RQ.Api.Print("Recipe scan unavailable: log into a tracked character and open their profession.")
+        else
+            RQ.SuppliesService.ScanRecipes()
+        end
+    elseif command == "mail" then
+        RQ.SuppliesService.Mail()
+    elseif command == "need" then
+        local item, count, member = argument:match("^(%d+)%s+(%d+)%s*(.-)$")
+        configurationResult(RQ.SuppliesService.SetNeed(tonumber(item), tonumber(count), member))
+    elseif command == "goal" then
+        local profession, recipe, skill, member = argument:match("^(%d+)%s+(%d+)%s+(%d+)%s*(.-)$")
+        configurationResult(RQ.SuppliesService.SetGoal(tonumber(profession), tonumber(recipe), tonumber(skill), member))
     elseif command == "rescan" then
         if not RQ.Database.initialized then
             RQ.Api.Print("Snapshot not saved: " .. RQ.Database.status)
@@ -148,6 +185,7 @@ RQ.Api.RegisterSlashCommand(function(message)
         configurationResult(RQ.Database.Unpin())
     elseif command == "close" then
         RQ.Api.HideRosterWindow()
+        RQ.Api.HideCopyWindow()
     elseif command == "main" then
         configurationResult(RQ.Database.SetMain(argument ~= "" and argument or RQ.Database.activeId))
     elseif command == "role" then
@@ -180,7 +218,9 @@ RQ.Api.RegisterSlashCommand(function(message)
         RQ.Api.Print(
             "Available commands: /rq, diag, rescan, roster [text], settings, close, slots, register, add, "
                 .. "link <slot>, ignore, name <slot> <name>, main [ID], role <role> [ID], unlink [ID], reset-window, "
-                .. "today [text], planning, pin <name|slot|ID>, unpin."
+                .. "today [text], planning, pin <name|slot|ID>, unpin, copy, fullname <first and last name>, "
+                .. "supplies, recipes [member], scan-recipes, mail, need <item> <count> [member], "
+                .. "goal <profession> <recipe> <skill> [member]."
         )
     end
 end)
@@ -192,6 +232,9 @@ local events = {
     "PLAYER_ENTERING_WORLD",
     "PLAYER_REGEN_DISABLED",
     "PLAYER_REGEN_ENABLED",
+    "TRADE_SKILL_SHOW",
+    "TRADE_SKILL_CLOSE",
+    "MAIL_SHOW",
 }
 for _, event in ipairs(RQ.Util.Keys(eventSections)) do
     events[#events + 1] = event

@@ -1,0 +1,13 @@
+{
+  "name": "Roster Quartermaster",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": ["sumneko.lua", "JohnnyMorganz.stylua", "ms-python.python"]
+    }
+  },
+  "postCreateCommand": "lua5.1 Tests/run.lua"
+}

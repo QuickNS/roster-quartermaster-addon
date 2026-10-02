@@ -80,7 +80,7 @@ function Card.Build(id, record, entry, now, activeId, staleHours, estimate)
     end
     lines[#lines + 1] = "Professions (skill/cap): "
         .. (#professions > 0 and table.concat(professions, ", ") or "None observed")
-    lines[#lines + 1] = "Profession targets / session objective: not configured (later milestones)"
+    lines[#lines + 1] = "Profession targets: /rq supplies | Recipes: /rq recipes | Session objective: later milestone"
     local uncertain = {}
     for _, section in ipairs(RQ.Util.Keys(RQ.Snapshot.fields)) do
         local state = (snapshot.sections or {})[section]
@@ -101,7 +101,7 @@ function Card.Build(id, record, entry, now, activeId, staleHours, estimate)
     lines[#lines + 1] = "ID: " .. text(id)
     return {
         id = id,
-        title = text(identity.displayName)
+        title = text(RQ.Character.DisplayName(identity))
             .. " - "
             .. text(identity.realm)
             .. (entry.isMain and " [MAIN]" or "")

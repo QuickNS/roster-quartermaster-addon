@@ -7,13 +7,11 @@ function Estimator.Describe(estimate)
     end
     local percentage = estimate.percentageOfLevel and string.format(" | %.1f%% of a level", estimate.percentageOfLevel)
         or ""
-    return "Rested XP: "
-        .. tostring(estimate.amount)
-        .. (estimate.isEstimated and " (estimated offline)" or " (observed live)")
-        .. percentage
-        .. " ["
-        .. estimate.confidence
-        .. "]"
+    local provenance = estimate.isEstimated and " (estimated offline)" or " (observed live)"
+    if estimate.cachedBaseline then
+        provenance = " (estimated offline; cached logout baseline)"
+    end
+    return "Rested XP: " .. tostring(estimate.amount) .. provenance .. percentage .. " [" .. estimate.confidence .. "]"
 end
 
 function Estimator.Profile(settings, entry)
@@ -37,25 +35,44 @@ local function complete(snapshot, section, at)
     return state and state.complete == true and state.observedAt == at
 end
 
-function Estimator.LogoutSample(snapshot, settings, entry)
+function Estimator.LogoutSample(snapshot, settings, entry, cached)
     local at = snapshot.lastLogout
+    if not RQ.Util.IsNumber(at) or at == 0 then
+        return nil, "Logout timestamp unavailable"
+    end
     if
-        not RQ.Util.IsNumber(at)
-        or at == 0
-        or snapshot.lastSeen ~= at
-        or not complete(snapshot, "progression", at)
-        or not complete(snapshot, "rested", at)
-        or not complete(snapshot, "location", at)
+        not RQ.Util.IsNumber(snapshot.lastSeen)
+        or snapshot.lastSeen == 0
+        or snapshot.lastSeen > at
+        or (not cached and snapshot.lastSeen ~= at)
     then
-        return nil
+        return nil, "No usable observation timestamp at logout"
+    end
+    local observedAt = at
+    for _, name in ipairs({ "progression", "rested", "location" }) do
+        local section = snapshot.sections and snapshot.sections[name]
+        if
+            not section
+            or not section.complete
+            or not RQ.Util.IsNumber(section.observedAt)
+            or section.observedAt == 0
+            or section.observedAt > at
+            or (not cached and section.observedAt ~= at)
+        then
+            return nil, "No complete " .. name .. " observation for the logout baseline"
+        end
+        observedAt = math.min(observedAt, section.observedAt)
     end
     for _, key in ipairs({ "level", "xp", "xpMax", "restedXp" }) do
         if not RQ.Util.IsNumber(snapshot[key]) then
-            return nil
+            return nil, "Logout baseline is missing " .. key
         end
     end
-    if snapshot.xpMax < 1 or type(snapshot.wasResting) ~= "boolean" then
-        return nil
+    if snapshot.xpMax < 1 then
+        return nil, "XP maximum is zero; rested XP cannot be estimated"
+    end
+    if type(snapshot.wasResting) ~= "boolean" then
+        return nil, "Resting state unavailable at logout"
     end
     entry = entry or {}
     return {
@@ -68,6 +85,8 @@ function Estimator.LogoutSample(snapshot, settings, entry)
         multiplier = entry.restedMultiplier or 1,
         revision = entry.restedRevision or 0,
         profile = Estimator.Profile(settings, entry),
+        cached = cached == true,
+        observedAt = observedAt,
     }
 end
 
@@ -108,7 +127,7 @@ function Estimator.Estimate(record, entry, settings, context)
     end
     local sample = state.logout
     if not sample then
-        return unknown("No complete logout observation; log in and out to establish one")
+        return unknown(state.logoutReason or "No complete logout observation; log in and out to establish one")
     end
     if not RQ.Util.IsNumber(context.now) or context.now < sample.at then
         return unknown("Offline clock unavailable or reversed")
@@ -147,7 +166,12 @@ function Estimator.Estimate(record, entry, settings, context)
         result.confidence = "LOW"
         result.warnings[#result.warnings + 1] = "Last observation exceeds configured cap; review assumptions"
     end
-    if context.staleHours and context.now - sample.at >= context.staleHours * 3600 then
+    if sample.cached then
+        result.cachedBaseline = true
+        result.confidence = "LOW"
+        result.warnings[#result.warnings + 1] = "Logout APIs unavailable; baseline uses earlier cached observations"
+    end
+    if context.staleHours and context.now - (sample.observedAt or sample.at) >= context.staleHours * 3600 then
         result.confidence = "LOW"
         result.warnings[#result.warnings + 1] = "Logout observation is stale"
     end
@@ -177,6 +201,9 @@ function Estimator.Calibrate(state, snapshot, settings, entry, now)
     end
     if not sample then
         return skip("No prior complete logout sample")
+    end
+    if sample.cached then
+        return skip("Cached logout baseline is too uncertain for rate calibration")
     end
     if sample.profile ~= profile then
         return skip("Rested assumptions or perk profile changed")

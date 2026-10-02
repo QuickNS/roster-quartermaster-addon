@@ -399,7 +399,7 @@ return function(h)
         input.characters["Player-Test-1"].restedState = nil
         local migrated, character, err = RQ.Migrations.Prepare(input, RQCharDB)
         assert(migrated and character, err)
-        equal(migrated.schemaVersion, 4)
+        equal(migrated.schemaVersion, 5)
         assert(migrated.characters["Player-Test-1"].restedState.logout)
         equal(input.characters["Player-Test-1"].restedState, nil)
         migrated.characters["Player-Test-1"].restedState.logout = nil
@@ -447,7 +447,7 @@ return function(h)
             equal(account, nil)
             equal(character, nil)
             assert(err)
-            equal(input.schemaVersion, 4)
+            equal(input.schemaVersion, 5)
         end
     end)
 
@@ -629,6 +629,97 @@ return function(h)
         h.flushTimers()
         close(RQDB.settings.planning.innRate, 0.0125)
         contains(h.messages(), "Missing planning value")
+    end)
+
+    test("cached logout estimates count only offline time and never calibrate an observed rate", function()
+        local settings, member, saved = setup()
+        local value = snapshot()
+        value.lastLogout = at + 600
+        saved.restedState.logout = RQ.RestedEstimator.LogoutSample(value, settings, member, true)
+        saved.restedState.calibration.inside = { settings.innRate }
+        local result = estimate(saved, member, settings, at + 4200)
+        equal(result.amount, 20250)
+        equal(result.cachedBaseline, true)
+        equal(result.confidence, "LOW")
+        contains(result.warnings, "cached observations")
+        contains({ RQ.RestedEstimator.Describe(result) }, "cached logout baseline")
+        local calibrated =
+            RQ.RestedEstimator.Calibrate(saved.restedState, snapshot(25, 20250, at + 4200), settings, member, at + 4200)
+        equal(calibrated.comparison.accepted, false)
+        equal(#calibrated.calibration.inside, 1)
+        contains({ calibrated.comparison.reason }, "Cached logout baseline")
+        equal(calibrated.logout, nil)
+        local recentLogout = at + 48 * 3600
+        value.lastLogout = recentLogout
+        saved.restedState.logout = RQ.RestedEstimator.LogoutSample(value, settings, member, true)
+        contains(estimate(saved, member, settings, recentLogout).warnings, "stale")
+    end)
+
+    test("cached baselines reject incomplete or future evidence and persist specific missing-data reasons", function()
+        local settings, member = setup()
+        for _, section in ipairs({ "progression", "rested", "location" }) do
+            local value = snapshot()
+            value.lastLogout = at + 600
+            value.sections[section].complete = false
+            local sample, reason = RQ.RestedEstimator.LogoutSample(value, settings, member, true)
+            equal(sample, nil)
+            contains({ reason }, section)
+            value.sections[section].complete = true
+            value.sections[section].observedAt = at + 601
+            equal(RQ.RestedEstimator.LogoutSample(value, settings, member, true), nil)
+        end
+        local value = snapshot()
+        value.xpMax = 0
+        local sample, reason = RQ.RestedEstimator.LogoutSample(value, settings, member, true)
+        equal(sample, nil)
+        contains({ reason }, "XP maximum is zero")
+        local state = RQ.PlanningConfig.PrepareState({ logoutReason = reason })
+        equal(estimate({ restedState = state }, member, settings).reason, reason)
+        equal(RQ.PlanningConfig.PrepareState({ logoutReason = false }), nil)
+        value.xpMax = 40000
+        sample = RQ.RestedEstimator.LogoutSample(value, settings, member, true)
+        sample.observedAt = nil
+        equal(RQ.PlanningConfig.PrepareState({ logout = sample }), nil)
+    end)
+
+    test("cached logout survives another character login without losing XP or sharing state", function()
+        start()
+        _G.GetServerTime = function()
+            return 123456900
+        end
+        _G.UnitXP = function()
+            return 0
+        end
+        _G.UnitXPMax = function()
+            return 0
+        end
+        h.emit("PLAYER_LOGOUT")
+        local offlineId = RQ.Database.activeId
+        assert(RQCharDB.restedState.logout.cached)
+        assert(RQCharDB.restedState.logout ~= RQDB.characters[offlineId].restedState.logout)
+        h.fakeCharacter()
+        _G.UnitGUID = function()
+            return "Player-Second"
+        end
+        _G.UnitName = function()
+            return "Second"
+        end
+        _G.GetServerTime = function()
+            return 123460500
+        end
+        RQCharDB = nil
+        h.loadAddon()
+        h.emit("PLAYER_LOGIN")
+        local offline = RQDB.characters[offlineId]
+        equal(offline.snapshot.xp, 12000)
+        equal(offline.snapshot.xpMax, 40000)
+        equal(offline.snapshot.money, 12345)
+        local report = RQ.PlanningService.Evaluate()
+        equal(report.estimates[offlineId].amount, 20062)
+        equal(report.estimates[offlineId].isEstimated, true)
+        equal(report.estimates[offlineId].cachedBaseline, true)
+        _G.SlashCmdList.ROSTERQUARTERMASTER("roster text")
+        contains(h.messages(), "cached logout baseline")
     end)
 
     test("offline descriptions never depend on evaluating an active character first", function()

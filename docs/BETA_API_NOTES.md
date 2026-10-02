@@ -44,6 +44,45 @@ API return values, event delivery details, and extended failure cases remain
 unconfirmed. No direct client access was available during implementation.
 Mock results must not be recorded as in-client observations.
 
+During 0.0.5 testing, the user supplied a roster screenshot showing the active
+level-21 character with valid XP/money/bags/professions and an offline level-20
+character with `0/0` XP, zero money/bags, no professions, and a missing rested
+baseline. The offline `lastSeen` and `lastLogout` timestamps matched. This is
+consistent with the final scan reading cleared client state, but no API/event
+trace was supplied. Simulating those logout API returns reproduced the overwrite.
+Version 0.0.6 preserves the earlier snapshot when logout progression is unusable,
+and labels fallback estimates as cached and LOW confidence. Live confirmation is
+pending; existing overwritten data must be recaptured on the affected character.
+
+### 0.0.6 API reference basis and remaining verification
+
+The user confirmed that Forever characters have first and last names. The adapter
+now prefers the unmodified player name and exposes all candidate name API returns
+in `/rq copy`. Its realm return is never assumed to be a surname. An explicit
+`/rq fullname` override is available until the exact name behavior is confirmed.
+
+The public [Forever addon kit API snapshot](https://github.com/Thunderz96/forever-addon-kit/blob/main/data/forever_api.json)
+lists `UnitNameUnmodified`, `C_Container.GetContainerItemInfo`, and the recipe APIs.
+The community [Forever type declarations](https://github.com/Atraeau/WoW-Addons/blob/main/types/WowForeverAPI.lua)
+document container stack count, item ID, binding and lock fields, and the recipe
+schematic API. These are reference evidence, not a transcript from the user's
+build. No third-party addon implementation was incorporated.
+
+New read paths to verify in client:
+
+- `UnitNameUnmodified("player")`; compare it with `UnitName` and `UnitFullName`.
+- `C_Container.GetContainerNumSlots/GetContainerItemInfo` and `C_Item.GetItemInfoInstant`.
+- `C_TradeSkillUI.IsTradeSkillReady/IsTradeSkillLinked/IsTradeSkillGuild/IsTradeSkillGuildMember`.
+- `GetBaseProfessionInfo/GetAllRecipeIDs/GetRecipeInfo/GetRecipeSourceText/GetRecipeSchematic`
+  in the `C_TradeSkillUI` namespace.
+- `TRADE_SKILL_SHOW`, `TRADE_SKILL_LIST_UPDATE`, `TRADE_SKILL_CLOSE`, `MAIL_SHOW`.
+- Multiline native EditBox selection and Ctrl+C through the copy window.
+
+Missing/invalid recipe data retains prior observations with an error. Unsupported
+reagent alternatives are not resolved automatically. Binding must explicitly be
+false and locking explicitly false before a stack is allocatable. Recipient,
+realm/faction and mail rules still require manual confirmation.
+
 The compatibility probe tests conventional WoW API names with capability checks;
 it does not assert that Forever exposes these APIs unchanged. Calls that throw
 are contained at the adapter boundary and reported by `/rq diag`. Restricted

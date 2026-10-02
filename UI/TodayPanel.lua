@@ -25,17 +25,16 @@ function Panel.Build(account, report)
                     .. text(comparison.actual)
             end
         end
-        cards[#cards + 1] = {
-            id = id,
-            actionKind = "pin",
-            action = pinned and "Unpin" or "Pin next",
-            title = (index == 1 and "Play next: " or index .. ". ")
-                .. text(record.identity.displayName)
-                .. " - "
-                .. text(record.identity.realm)
-                .. (pinned and " [PINNED]" or ""),
-            body = table.concat(lines, "\n"),
-        }
+        cards[#cards + 1] =
+            {
+                id = id,
+                actionKind = "pin",
+                action = pinned and "Unpin" or "Pin next",
+                title = (index == 1 and "Play next: " or index .. ". ") .. text(
+                    RQ.Character.DisplayName(record.identity)
+                ) .. " - " .. text(record.identity.realm) .. (pinned and " [PINNED]" or ""),
+                body = table.concat(lines, "\n"),
+            }
     end
     if #cards == 0 then
         cards[1] = {

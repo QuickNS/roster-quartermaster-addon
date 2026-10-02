@@ -37,26 +37,33 @@ function Diagnostics.Slots()
     RQ.Api.Print("Use /rq link <slot> for this character, or /rq name <slot> <planned name> to edit a label.")
 end
 
-function Diagnostics.Roster()
+function Diagnostics.Roster(silent, includeIgnored)
+    local lines = {}
+    local function output(text)
+        lines[#lines + 1] = text
+        if not silent then
+            RQ.Api.Print(text)
+        end
+    end
     if not RQ.Database.initialized then
-        RQ.Api.Print("Roster unavailable: " .. RQ.Database.status)
-        return
+        output("Roster unavailable: " .. RQ.Database.status)
+        return lines
     end
     local now = RQ.Api.GetServerTime()
     local planning, planningError = RQ.PlanningService.Evaluate()
     if not planning then
-        RQ.Api.Print("Rested planning unavailable: " .. planningError)
+        output("Rested planning unavailable: " .. planningError)
     end
     local count = 0
     for _, id in ipairs(RQ.Util.Keys(RQDB.characters)) do
         local record = RQDB.characters[id]
-        if record.registration ~= "ignored" then
+        if includeIgnored or record.registration ~= "ignored" then
             count = count + 1
             local entry = RQDB.roster[id] or {}
             local snapshot = record.snapshot
             local freshness = RQ.Snapshot.Freshness(snapshot, now, RQDB.policies.staleSnapshotHours)
-            RQ.Api.Print(
-                display(record.identity.displayName)
+            output(
+                display(RQ.Character.DisplayName(record.identity))
                     .. " - "
                     .. display(record.identity.realm)
                     .. " ["
@@ -69,7 +76,7 @@ function Diagnostics.Roster()
                     .. "; last seen: "
                     .. display(snapshot.lastSeen)
             )
-            RQ.Api.Print(
+            output(
                 "  ID: "
                     .. id
                     .. "; planned: "
@@ -79,7 +86,7 @@ function Diagnostics.Roster()
                     .. "; main: "
                     .. display(entry.isMain == true)
             )
-            RQ.Api.Print(
+            output(
                 "  Last observed XP: "
                     .. display(snapshot.xp)
                     .. "/"
@@ -91,8 +98,31 @@ function Diagnostics.Roster()
                     .. "; resting: "
                     .. display(snapshot.wasResting)
             )
+            output(
+                "  Money: "
+                    .. display(snapshot.money)
+                    .. "; free/total bag slots: "
+                    .. display(snapshot.freeBagSlots)
+                    .. "/"
+                    .. display(snapshot.bagSlots)
+                    .. "; last logout: "
+                    .. display(snapshot.lastLogout)
+            )
+            for _, professionId in ipairs(RQ.Util.Keys(snapshot.professions or {})) do
+                local profession = snapshot.professions[professionId]
+                output(
+                    "  Profession "
+                        .. professionId
+                        .. ": "
+                        .. profession.name
+                        .. " "
+                        .. profession.skill
+                        .. "/"
+                        .. profession.maxSkill
+                )
+            end
             if planning then
-                RQ.Api.Print("  " .. RQ.RestedEstimator.Describe(planning.estimates[id]))
+                output("  " .. RQ.RestedEstimator.Describe(planning.estimates[id]))
             end
             for _, section in ipairs(RQ.Util.Keys(RQ.Snapshot.fields)) do
                 local state = snapshot.sections[section]
@@ -104,7 +134,7 @@ function Diagnostics.Roster()
                     or now < state.observedAt
                     or now - state.observedAt >= RQDB.policies.staleSnapshotHours * 3600
                 then
-                    RQ.Api.Print(
+                    output(
                         "  "
                             .. section
                             .. ": incomplete, stale, or never observed; last successful scan: "
@@ -114,12 +144,16 @@ function Diagnostics.Roster()
             end
         end
     end
-    RQ.Api.Print(
-        tostring(count) .. " tracked character(s); ignored characters omitted. Use /rq slots for provisional entries."
+    output(
+        tostring(count)
+            .. " tracked character(s); "
+            .. (includeIgnored and "includes ignored characters." or "ignored characters omitted.")
+            .. " Use /rq slots for provisional entries."
     )
+    return lines
 end
 
-function Diagnostics.Report()
+function Diagnostics.Report(silent)
     local api = RQ.Api
     local build = api.GetBuildInfo()
     local project = api.GetClientProject()
@@ -131,7 +165,7 @@ function Diagnostics.Report()
         "Interface: " .. display(build.interface) .. "; project ID: " .. display(project),
         "Target: Forever; client flavour is not inferred from the project ID.",
         "GUID: " .. display(identity.guid),
-        "Character: " .. display(identity.displayName) .. "; realm: " .. display(identity.realm),
+        "Character: " .. display(RQ.Character.DisplayName(identity)) .. "; realm: " .. display(identity.realm),
         "Class: " .. display(identity.class) .. "; race: " .. display(identity.race),
         "Level: " .. display(snapshot.level) .. "; XP: " .. display(snapshot.xp) .. "/" .. display(snapshot.xpMax),
         "Rested XP (observed): " .. display(snapshot.restedXp) .. "; resting: " .. display(snapshot.wasResting),
@@ -202,14 +236,33 @@ function Diagnostics.Report()
             lines[#lines + 1] = "Inventory "
                 .. source
                 .. ": "
-                .. (inventory.complete and "cached (not refreshed by this milestone)" or "UNKNOWN / not scanned")
+                .. (inventory.complete and "cached" or "UNKNOWN / incomplete")
                 .. "; scanned: "
                 .. display(inventory.scannedAt)
         end
         lines[#lines + 1] = "Recipes: "
-            .. (record.recipes.complete and "cached (not refreshed by this milestone)" or "UNKNOWN / not scanned")
+            .. "observed per profession; unscanned professions remain unknown"
             .. "; scanned: "
             .. display(record.recipes.scannedAt)
+        if record.inventory.bags.error then
+            lines[#lines + 1] = "Bag scan: " .. record.inventory.bags.error
+        end
+        if record.recipes.error then
+            lines[#lines + 1] = "Recipe scan: " .. record.recipes.error
+        end
+        for _, professionId in ipairs(RQ.Util.Keys(record.recipes.professions)) do
+            local scan = record.recipes.professions[professionId]
+            local known = 0
+            for _, recipe in pairs(scan.recipes) do
+                if recipe.learned then
+                    known = known + 1
+                end
+            end
+            lines[#lines + 1] = scan.name .. " recipes known: " .. known .. "; observed: " .. scan.scannedAt
+        end
+    end
+    for _, line in ipairs(api.GetNameEvidence()) do
+        lines[#lines + 1] = line
     end
     local capabilities = api.GetCapabilities()
     local names = {}
@@ -220,8 +273,30 @@ function Diagnostics.Report()
     for _, name in ipairs(names) do
         lines[#lines + 1] = name .. ": " .. capabilities[name]
     end
-    for _, line in ipairs(lines) do
-        api.Print(line)
+    if not silent then
+        for _, line in ipairs(lines) do
+            api.Print(line)
+        end
     end
     return lines
+end
+
+function Diagnostics.Copy()
+    local lines = Diagnostics.Report(true)
+    if RQ.Database.initialized then
+        lines[#lines + 1] = "\nACCOUNT ROSTER (includes character names, GUIDs and realms)"
+        for _, line in ipairs(Diagnostics.Roster(true, true)) do
+            lines[#lines + 1] = line
+        end
+        for _, id in ipairs(RQ.Util.Keys(RQDB.characters)) do
+            lines[#lines + 1] = "\nSUPPLIES"
+            for _, line in ipairs(RQ.SuppliesService.Report(id)) do
+                lines[#lines + 1] = line
+            end
+        end
+    end
+    return RQ.Api.ShowCopyWindow(
+        "Copy addon report - review personal information before sharing",
+        table.concat(lines, "\n")
+    )
 end

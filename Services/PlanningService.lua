@@ -61,10 +61,11 @@ function Planning.Login(captured)
     end
 end
 
-function Planning.Logout(snapshot)
+function Planning.Logout(snapshot, cached)
     local record = RQ.Database.Current()
     local state = RQ.Util.Copy(record.restedState)
-    state.logout = RQ.RestedEstimator.LogoutSample(snapshot, RQDB.settings.planning, RQDB.roster[RQ.Database.activeId])
+    state.logout, state.logoutReason =
+        RQ.RestedEstimator.LogoutSample(snapshot, RQDB.settings.planning, RQDB.roster[RQ.Database.activeId], cached)
     local ok, err = RQ.Database.SaveRestedState(RQ.Database.activeId, state)
     if not ok then
         RQ.Api.Print("Rested logout sample not saved: " .. err)
@@ -85,7 +86,7 @@ function Planning.TextReport()
         RQ.Api.Print(
             index
                 .. ". "
-                .. (identity.displayName or result.characterId)
+                .. (RQ.Character.DisplayName(identity) or result.characterId)
                 .. " ["
                 .. result.confidence
                 .. "] score "

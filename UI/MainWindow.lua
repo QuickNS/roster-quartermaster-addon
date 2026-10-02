@@ -22,6 +22,8 @@ local function model()
             return nil, "Today module did not load; reinstall the complete addon."
         end
         view.cards = RQ.TodayPanel.Build(RQDB, report)
+    elseif Window.tab == "supplies" then
+        view.cards = RQ.SuppliesService.Cards(RQDB)
     end
     Window.selectedId, Window.selectedSlot = view.selectedId, view.selectedSlot
     view.tab = Window.tab
@@ -122,6 +124,9 @@ handlers.configure = function(id, slotId)
     Window.selectedSlot = slotId or Window.selectedSlot
     Window.status = ""
     Window.Open("settings")
+end
+handlers.supplies = function(id)
+    RQ.SuppliesService.Open(id)
 end
 handlers.pin = function(id)
     if id == RQDB.settings.planning.pinnedCharacterId then

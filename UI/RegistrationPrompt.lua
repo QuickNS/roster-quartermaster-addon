@@ -54,5 +54,8 @@ function Prompt.Show(force)
             return true
         end,
     }
-    RQ.Api.ShowRegistrationPrompt("Register " .. (record.identity.displayName or "this character"), choices)
+    RQ.Api.ShowRegistrationPrompt(
+        "Register " .. (RQ.Character.DisplayName(record.identity) or "this character"),
+        choices
+    )
 end

@@ -1,6 +1,10 @@
 local Character = {}
 RQ.Character = Character
 
+function Character.DisplayName(identity)
+    return identity.fullName or identity.displayName
+end
+
 Character.roles = { "UNASSIGNED", "TANK", "HEALER", "DPS", "HEALER_DPS", "FLEX" }
 Character.roleLabels = {
     UNASSIGNED = "Unassigned",

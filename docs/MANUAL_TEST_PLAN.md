@@ -26,7 +26,7 @@ simulate a clean installation; use a backed-up test profile instead.
    the client. Check the build/interface values against the installation evidence.
 6. Check that missing/failed APIs appear explicitly in the capability list.
    A reported numeric project ID must not be treated as confirmation of flavour.
-7. Confirm account and character schema versions are `4` and the SavedVariables
+7. Confirm account and character schema versions are `5` and the SavedVariables
    status is `initialized`.
 8. Confirm the login events are `observed`, while logout is not claimed observed
    before it has occurred.
@@ -49,13 +49,14 @@ simulate a clean installation; use a backed-up test profile instead.
 Profession and bag APIs may be unavailable on the beta client. Expect an
 `INCOMPLETE` section with a diagnostic capability reason, not a fabricated empty
 profession list or zero bag capacity. Older observations should be retained.
-Inventory bags/bank/mail and recipe sources remain unscanned in this milestone.
+Bag item contents and opened professions are now scanned. Bank/mail contents
+remain unknown; opening one profession must not mark other professions scanned.
 
 ## Upgrade and registration
 
 1. Close the client and back up both SavedVariables files. Keep the backup outside
    the addon directory. Install all runtime directories listed in the README.
-2. Log into a character used with 0.0.1 through 0.0.4. Confirm schema 4, retained custom settings
+2. Log into a character used with 0.0.1 through 0.0.5. Confirm schema 5, retained custom settings
    and prior logout timestamp, and a new account character record. Registration
    must remain pending until you choose; a matching planned name is not consent.
 3. Choose **Link** to the intended slot, or use `/rq link warrior` on the main.
@@ -122,7 +123,7 @@ Inventory bags/bank/mail and recipe sources remain unscanned in this milestone.
 ## Rested planning and Today (0.0.5)
 
 1. Install the **complete** 0.0.5 addon and TOC after backing up SavedVariables.
-   Confirm schema 4 and prior registrations, names, roles, and window position.
+   Confirm schema 5 and prior registrations, names, roles, and window position.
 2. Open `/rq today`. With enabled members, confirm a **Play next** card, other ranked
    members, confidence, and two or three ranking reasons each. With no enabled
    members, expect registration guidance instead of an invented recommendation.
@@ -171,6 +172,25 @@ Inventory bags/bank/mail and recipe sources remain unscanned in this milestone.
 
 ## Reload and restart persistence
 
+### Logout teardown regression (0.0.6)
+
+1. Back up SavedVariables and install the complete 0.0.6 addon. Confirm schema 5.
+2. Revisit any character whose older snapshot shows `0/0` XP and empty money,
+   bags, or professions. After loading into the world, `/rq rescan` and verify
+   the values against the client. Previously overwritten data needs this new scan.
+3. Note XP/XPMax, money, bag capacity, profession skills, and observation timestamps.
+   Log out normally and log into another character. On `/rq roster`, those values
+   must not have been replaced with teardown zeros or an empty profession list.
+4. If logout APIs were unavailable, expect **estimated offline; cached logout
+   baseline** and LOW confidence, with the earlier observation timestamps intact.
+   Incomplete prior evidence must remain unknown with a specific explanation.
+5. Return to that character. A cached fallback must not add a calibration sample;
+   the last comparison should explain why. A valid live logout scan still supports
+   normal calibration. At level cap, zero XP maximum may be legitimate and should
+   not create a fabricated rested estimate.
+
+### SavedVariables persistence
+
 1. Using a client-supported variable inspector, set
    `RQDB.settings.persistenceProbe` to a recognizable string and
    `RQCharDB.persistenceProbe` to a different recognizable string.
@@ -186,6 +206,50 @@ Inventory bags/bank/mail and recipe sources remain unscanned in this milestone.
 Mock tests cover reinitialization of the tables, not the client's disk writes.
 Do not report a full restart pass based on a successful `/reload`.
 
+## Copy reports, names, recipes and supplies (0.0.6)
+
+1. Open `/rq copy` or **Copy report**. Press Ctrl+C and paste into a text editor.
+   Check the report includes diagnostics, name API returns, the offline roster,
+   and grocery targets. Review private character details before sharing.
+   Editing the report must not alter saved state. Test Select all, scrollbar,
+   Close/Escape, and combat hiding at your UI scale.
+2. Compare each full name to the character screen. Verify first and last name are
+   present, with the realm separate. If still shortened, preserve the report's
+   three name API lines and use `/rq fullname First Last` as an explicit override.
+   Test two different characters with the same first name if naturally available.
+   Confirm distinct GUID records and unambiguous full-name pin/recipient lookup.
+3. Visit each member, wait for world loading, and rescan. Compare bag item counts
+   against the client. Move/loot/use an item and wait for the debounced bag event.
+   A failed scan must retain old counts with an incomplete/error marker.
+4. Open each profession. `/rq recipes` should distinguish known and unlearned
+   recipes, show IDs and materials, and preserve acquisition information when the
+   API supplies it. Inspect `/rq diag` for API failures if empty. Open a linked or
+   guild profession list: it must not replace your own learned recipes.
+5. Choose an observed recipe and set `/rq goal <profession> <recipe> <target skill>`.
+   `/rq supplies` should show approximate crafts and material shortages toward
+   that target. Skill gains and bag changes must recompute the grocery list.
+   Missing or alternative reagent data must be explicit, not guessed.
+6. Set `/rq need <item ID> <quantity> <other member>` for an item in the active
+   character's bags. Give the sender a stock target too. `/rq mail` must propose
+   only surplus above that reserve and never allocate the same stock twice.
+   A recipe goal and minimum-stock need for the same item must not double-count.
+7. Test bound and locked stacks: neither may be allocated. Unavailable binding
+   information must not be assumed tradable. Stale recipients need warnings;
+   stale/incomplete sender bags must prevent proposals until refreshed.
+8. Test a spare general-purpose bag and a member with empty regular bag slots.
+   Existing unequipped bags on that member must reduce the suggested quantity.
+   Verify size/type manually; bag upgrades are not inferred from unknown capacity.
+9. Test a recipe item whose acquisition link appears in an observed unlearned
+   recipe. Suggest at most one copy per recipient and preserve the sender's own
+   unlearned copy. Already learned or unmapped recipes must not be claimed needed.
+   Unmapped scrolls can still be manually marked with `/rq need`.
+10. Open the mailbox: expect a `/rq mail` hint, no automatic attachments, recipient,
+    or sending. After manually sending, rescan bags. Bank/mail/in-transit stock is
+    not counted; collect mail on recipients before relying on another allocation.
+11. Reload and fully restart: full-name overrides, recipes, stock targets and goals
+    must survive independently per character. Quantity/skill 0 removes a need/goal.
+12. Record actual Forever API results separately from the Docker/mocked test pass.
+
 ## Failure handling and safety
 
 1. In a backed-up test profile, try a future schema number and a malformed root or
@@ -198,8 +262,9 @@ Do not report a full restart pass based on a successful `/reload`.
    the addon must not guess that showing a popup is safe.
 4. Test unavailable native UI templates in a mocked or supported test environment.
    Expect an explicit error and working `/rq add`, `/rq link`, and `/rq ignore`.
-5. Confirm there are no per-frame bag scans or background inventory work.
+5. Confirm there are no per-frame scans; bag events coalesce and recipe scans occur
+   only for ready owned profession windows, not closed/linked/guild windows.
 6. Record actual results and client build in `BETA_API_NOTES.md`.
 
-Item-level bags/bank/mail, profession/material planning,
-checklists, and import/export need separate acceptance tests as they are added.
+Bank/mail contents, in-transit tracking, curated leveling routes, category routing,
+checklists, and configuration import/export need separate tests as they are added.

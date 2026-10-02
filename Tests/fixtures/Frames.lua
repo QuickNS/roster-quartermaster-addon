@@ -119,6 +119,9 @@ return function()
         function widget:ClearFocus()
             self.focus = false
         end
+        function widget:HighlightText()
+            self.highlighted = true
+        end
         function widget:StartMoving()
             self.moving = true
         end
@@ -144,6 +147,8 @@ return function()
             "EnableMouseWheel",
             "SetAutoFocus",
             "SetMaxLetters",
+            "SetMultiLine",
+            "SetFontObject",
             "SetNormalTexture",
             "SetHighlightTexture",
             "RegisterForClicks",

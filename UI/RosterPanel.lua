@@ -35,7 +35,7 @@ function Panel.Build(account, activeId, now, selectedId, selectedSlot, estimates
     local characterLabel = "No character snapshots yet"
     local characterDetails = "Log in and run /rq rescan."
     if record then
-        characterLabel = text(record.identity.displayName)
+        characterLabel = text(RQ.Character.DisplayName(record.identity))
             .. " - "
             .. text(record.identity.realm)
             .. " ["

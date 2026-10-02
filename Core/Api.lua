@@ -106,12 +106,17 @@ function Api.GetCharacterIdentity()
         displayName = identityText("UnitName", "player"),
         realm = identityText("GetRealmName"),
     }
+    local unmodified = identityText("UnitNameUnmodified", "player")
+    if unmodified then
+        identity.displayName = unmodified
+    end
     local class = call("UnitClass", "player")
     if class and RQ.Util.IsText(class[3]) then
         identity.class = class[3]
     elseif class then
         capabilities.UnitClass = "unexpected return type"
     end
+
     local race = call("UnitRace", "player")
     if race and RQ.Util.IsText(race[2]) then
         identity.race = race[2]
@@ -119,6 +124,19 @@ function Api.GetCharacterIdentity()
         capabilities.UnitRace = "unexpected return type"
     end
     return identity
+end
+
+function Api.GetNameEvidence()
+    local lines = {}
+    for _, name in ipairs({ "UnitName", "UnitNameUnmodified", "UnitFullName" }) do
+        local result = call(name, "player")
+        lines[#lines + 1] = name
+            .. ": "
+            .. (result and tostring(result[2]) or "unavailable")
+            .. "; realm return: "
+            .. (result and tostring(result[3]) or "unavailable")
+    end
+    return lines
 end
 
 function Api.GetCharacterProgression()
@@ -241,6 +259,214 @@ function Api.GetProfessions()
         end
     end
     return professions
+end
+
+local function publicData(value, depth)
+    if type(_G.issecretvalue) == "function" then
+        local ok, secret = pcall(_G.issecretvalue, value)
+        if not ok or secret then
+            return false
+        end
+    end
+    if type(value) ~= "table" then
+        return true
+    end
+    if depth > 8 then
+        return false
+    end
+    for key, child in pairs(value) do
+        if not publicData(key, depth + 1) or not publicData(child, depth + 1) then
+            return false
+        end
+    end
+    return true
+end
+
+local function dataCall(name, ...)
+    local result = call(name, ...)
+    if not result then
+        return nil, name .. ": " .. capabilities[name]
+    end
+    if not publicData(result, 0) then
+        capabilities[name] = "restricted or unsupported nested data"
+        return nil, name .. ": " .. capabilities[name]
+    end
+    return result
+end
+
+function Api.GetBagItems()
+    local count = _G.NUM_TOTAL_EQUIPPED_BAG_SLOTS or _G.NUM_BAG_SLOTS
+    if not publicData(count, 0) or not RQ.SuppliesConfig.Count(count) or count > 20 then
+        return nil, "Equipped bag count unavailable."
+    end
+    local regular = _G.NUM_BAG_SLOTS
+    if not publicData(regular, 0) or not RQ.SuppliesConfig.Count(regular) or regular > count then
+        regular = nil
+    end
+    local now = Api.GetServerTime()
+    if not now or now == 0 then
+        return nil, "Bag scan timestamp unavailable."
+    end
+    local scan = { complete = true, scannedAt = now, items = {}, tradable = {}, details = {}, equipped = {} }
+    for bag = 0, count do
+        local slots = scalar("C_Container.GetContainerNumSlots", "number", bag)
+        if not RQ.SuppliesConfig.Count(slots) or slots > 100 or (bag == 0 and slots == 0) then
+            return nil, "Bag slots unavailable; previous inventory retained."
+        end
+        if regular and bag > 0 and bag <= regular then
+            scan.equipped[bag] = slots
+        end
+        for slot = 1, slots do
+            local result, err = dataCall("C_Container.GetContainerItemInfo", bag, slot)
+            if not result then
+                return nil, err
+            end
+            local info = result[2]
+            if info ~= nil then
+                if
+                    type(info) ~= "table"
+                    or not RQ.SuppliesConfig.Id(info.itemID)
+                    or not RQ.SuppliesConfig.Count(info.stackCount)
+                    or info.stackCount == 0
+                then
+                    return nil, "Invalid item data; previous inventory retained."
+                end
+                local id = info.itemID
+                scan.items[id] = (scan.items[id] or 0) + info.stackCount
+                if info.isBound == false and info.isLocked == false then
+                    scan.tradable[id] = (scan.tradable[id] or 0) + info.stackCount
+                end
+                local detail = {}
+                if RQ.Util.IsText(info.itemName) then
+                    detail.name = info.itemName
+                end
+                local item = dataCall("C_Item.GetItemInfoInstant", id)
+                if item and RQ.SuppliesConfig.Count(item[7]) and RQ.SuppliesConfig.Count(item[8]) then
+                    detail.classId, detail.subclassId = item[7], item[8]
+                end
+                scan.details[id] = detail
+            end
+        end
+    end
+    return scan
+end
+
+local function dataArray(value, maximum)
+    if type(value) ~= "table" or #value > maximum then
+        return false
+    end
+    local count = 0
+    for key in pairs(value) do
+        if not RQ.SuppliesConfig.Id(key) or key > #value then
+            return false
+        end
+        count = count + 1
+    end
+    return count == #value
+end
+
+function Api.GetProfessionRecipes()
+    if
+        scalar("C_TradeSkillUI.IsTradeSkillReady", "boolean") ~= true
+        or scalar("C_TradeSkillUI.IsTradeSkillLinked", "boolean") ~= false
+        or scalar("C_TradeSkillUI.IsTradeSkillGuild", "boolean") ~= false
+        or scalar("C_TradeSkillUI.IsTradeSkillGuildMember", "boolean") ~= false
+    then
+        return nil, "Open your own ready profession window; linked/guild recipes are not recorded as yours."
+    end
+    local base, err = dataCall("C_TradeSkillUI.GetBaseProfessionInfo")
+    if not base then
+        return nil, err
+    end
+    base = base[2]
+    if
+        type(base) ~= "table"
+        or not RQ.SuppliesConfig.Id(base.professionID)
+        or not RQ.Util.IsText(base.professionName)
+    then
+        return nil, "Profession identity unavailable."
+    end
+    local ids
+    ids, err = dataCall("C_TradeSkillUI.GetAllRecipeIDs")
+    if not ids then
+        return nil, err
+    end
+    ids = ids[2]
+    if not dataArray(ids, 10000) then
+        return nil, "Recipe list unavailable or too large."
+    end
+    local now = Api.GetServerTime()
+    if not now or now == 0 then
+        return nil, "Recipe scan timestamp unavailable."
+    end
+    local scan = { name = base.professionName, complete = true, scannedAt = now, recipes = {} }
+    for _, id in ipairs(ids) do
+        if not RQ.SuppliesConfig.Id(id) then
+            return nil, "Invalid recipe ID."
+        end
+        local info
+        info, err = dataCall("C_TradeSkillUI.GetRecipeInfo", id)
+        if not info then
+            return nil, err
+        end
+        info = info[2]
+        if type(info) ~= "table" or not RQ.Util.IsText(info.name) or type(info.learned) ~= "boolean" then
+            return nil, "Recipe data is still loading; previous recipes retained."
+        end
+        local recipe = {
+            name = info.name,
+            learned = info.learned,
+            reagents = {},
+            reagentsComplete = false,
+            skillUps = RQ.SuppliesConfig.Count(info.numSkillUps) and info.numSkillUps or 1,
+        }
+        local source = scalar("C_TradeSkillUI.GetRecipeSourceText", "string", id)
+        recipe.source = source
+        if source then
+            local found, ambiguous
+            for rawId in source:gmatch("|Hitem:(%d+)") do
+                local itemId = tonumber(rawId)
+                if itemId and RQ.SuppliesConfig.Id(itemId) then
+                    local item = dataCall("C_Item.GetItemInfoInstant", itemId)
+                    if item and item[7] == 9 then
+                        if found and found ~= itemId then
+                            ambiguous = true
+                        end
+                        found = itemId
+                    end
+                end
+            end
+            if not ambiguous then
+                recipe.sourceItem = found
+            end
+        end
+        local schematic = dataCall("C_TradeSkillUI.GetRecipeSchematic", id, false)
+        schematic = schematic and schematic[2]
+        if type(schematic) == "table" and dataArray(schematic.reagentSlotSchematics, 100) then
+            recipe.reagentsComplete = true
+            for _, reagentSlot in ipairs(schematic.reagentSlotSchematics) do
+                if type(reagentSlot) ~= "table" or type(reagentSlot.required) ~= "boolean" then
+                    recipe.reagentsComplete = false
+                elseif reagentSlot.required then
+                    local reagents = reagentSlot.reagents
+                    if
+                        not dataArray(reagents, 100)
+                        or #reagents ~= 1
+                        or type(reagents[1]) ~= "table"
+                        or not RQ.SuppliesConfig.Id(reagents[1].itemID)
+                        or not RQ.SuppliesConfig.Count(reagentSlot.quantityRequired)
+                    then
+                        recipe.reagentsComplete = false
+                    else
+                        local item = reagents[1].itemID
+                        recipe.reagents[item] = (recipe.reagents[item] or 0) + reagentSlot.quantityRequired
+                    end
+                end
+            end
+        end
+        scan.recipes[id] = recipe
+    end
+    return { professionId = base.professionID, scan = scan }
 end
 
 function Api.After(seconds, callback)
@@ -580,6 +806,9 @@ local function createDashboard(position, handlers)
     background:SetAllPoints()
     background:SetColorTexture(0.035, 0.035, 0.045, 0.97)
     dashboard.title = uiText(frame, 18, -16, 610, "GameFontNormalLarge")
+    uiButton(frame, "Copy report", 560, -12, 140, function()
+        RQ.Diagnostics.Copy()
+    end)
     uiButton(frame, "Close", 712, -12, 72, Api.HideRosterWindow)
     dashboard.todayTab = uiButton(frame, "Today", 18, -48, 100, function()
         dashboard.handlers.tab("today")
@@ -592,6 +821,9 @@ local function createDashboard(position, handlers)
     end)
     dashboard.planningTab = uiButton(frame, "Planning", 342, -48, 110, function()
         dashboard.handlers.tab("planning")
+    end)
+    dashboard.suppliesTab = uiButton(frame, "Supplies", 460, -48, 110, function()
+        dashboard.handlers.tab("supplies")
     end)
     uiButton(frame, "Rescan current", 618, -48, 166, function()
         dashboard.handlers.rescan()
@@ -712,13 +944,14 @@ function Api.RenderRosterWindow(view, handlers, position)
         enable(dashboard.settingsTab, view.tab ~= "settings")
         enable(dashboard.todayTab, view.tab ~= "today")
         enable(dashboard.planningTab, view.tab ~= "planning")
+        enable(dashboard.suppliesTab, view.tab ~= "supplies")
         if view.tab ~= "planning" then
             dashboard.planningPanel:Hide()
         end
         if dashboard.renderedTab ~= view.tab then
             dashboard.scroll:SetVerticalScroll(0)
         end
-        if view.tab == "roster" or view.tab == "today" then
+        if view.tab == "roster" or view.tab == "today" or view.tab == "supplies" then
             dashboard.settings:Hide()
             dashboard.scroll:Show()
             local y = 0
@@ -735,6 +968,8 @@ function Api.RenderRosterWindow(view, handlers, position)
                     row.button = uiButton(row, "Configure", 580, -10, 130, function()
                         if row.actionKind == "pin" then
                             dashboard.handlers.pin(row.characterId)
+                        elseif row.actionKind == "supplies" then
+                            dashboard.handlers.supplies(row.characterId)
                         else
                             dashboard.handlers.configure(row.characterId, row.slotId)
                         end
@@ -827,6 +1062,75 @@ function Api.RenderRosterWindow(view, handlers, position)
         Api.HideRosterWindow()
     end
     return ok, err
+end
+
+local copyWindow
+
+function Api.HideCopyWindow()
+    if copyWindow then
+        copyWindow.frame:Hide()
+    end
+end
+
+function Api.ShowCopyWindow(title, text)
+    if Api.IsInCombat() ~= false then
+        Api.Print("Copy window unavailable during combat or without a combat-state API.")
+        return false
+    end
+    local ok, err = uiOperation("copyWindow", function()
+        if not copyWindow then
+            local frame = uiFrame("Frame", _G.UIParent, nil, "RQCopyWindow")
+            frame:Hide()
+            frame:SetSize(800, 600)
+            frame:SetPoint("CENTER")
+            frame:SetFrameStrata("FULLSCREEN_DIALOG")
+            frame:EnableMouse(true)
+            local background = frame:CreateTexture(nil, "BACKGROUND")
+            background:SetAllPoints()
+            background:SetColorTexture(0.035, 0.035, 0.045, 0.99)
+            local heading = uiText(frame, 18, -16, 650, "GameFontNormal")
+            uiButton(frame, "Close", 710, -12, 72, Api.HideCopyWindow)
+            local scroll = uiFrame("ScrollFrame", frame, "UIPanelScrollFrameTemplate")
+            scroll:SetPoint("TOPLEFT", 20, -65)
+            scroll:SetPoint("BOTTOMRIGHT", -40, 55)
+            local edit = uiFrame("EditBox", scroll)
+            edit:SetMultiLine(true)
+            edit:SetFontObject("ChatFontNormal")
+            edit:SetAutoFocus(false)
+            edit:SetMaxLetters(0)
+            edit:SetWidth(720)
+            edit:SetScript("OnEscapePressed", Api.HideCopyWindow)
+            scroll:SetScrollChild(edit)
+            frame:SetScript("OnHide", function()
+                edit:ClearFocus()
+            end)
+            uiButton(frame, "Select all - Ctrl+C to copy", 18, -556, 280, function()
+                edit:SetFocus()
+                edit:HighlightText()
+            end)
+            uiText(frame, 320, -564, 450):SetText("Paste outside the game; editing here does not change saved data.")
+            copyWindow = { frame = frame, edit = edit, heading = heading, scroll = scroll }
+            if type(_G.UISpecialFrames) == "table" then
+                table.insert(_G.UISpecialFrames, "RQCopyWindow")
+            end
+        end
+        copyWindow.heading:SetText(title)
+        copyWindow.edit:SetText(text)
+        local rows = 0
+        for line in (text .. "\n"):gmatch("(.-)\n") do
+            rows = rows + math.max(1, math.ceil(#line / 85))
+        end
+        copyWindow.edit:SetHeight(math.max(460, rows * 18))
+        copyWindow.scroll:SetVerticalScroll(0)
+        copyWindow.frame:Show()
+        copyWindow.edit:SetFocus()
+        copyWindow.edit:HighlightText()
+    end)
+    if not ok then
+        Api.HideCopyWindow()
+        Api.Print("Copy window unavailable: " .. err .. ". Use /rq diag or /rq roster text.")
+    end
+    return ok
 end
 
 function Api.CreateMinimapButton(onClick)

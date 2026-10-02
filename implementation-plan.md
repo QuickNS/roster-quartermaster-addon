@@ -648,6 +648,8 @@ Track for each profession:
 
 - Current skill.
 - Current configured target.
+- Observed known/unlearned recipes per character, including acquisition sources when exposed.
+- A selected recipe focus toward the next milestone and a live-updated material grocery list.
 - Next milestone.
 - Character responsible.
 - Last scan time.
@@ -762,6 +764,7 @@ Today
 Each character card shows:
 
 - Actual and planned name.
+- Full first-and-last character name, separate from the realm and provisional label.
 - Race, class, role, and main indicator.
 - Level and XP.
 - Rested XP with exact/estimated marker.
@@ -794,6 +797,7 @@ Allow editing:
 - No combat-time popups except critical errors explicitly enabled by the user.
 - Keyboard and mouse operation.
 - Text should remain understandable without colour alone.
+- Selectable, copyable diagnostic and roster text for reporting problems without screenshots.
 
 ---
 
@@ -977,6 +981,9 @@ Deliverables:
 - Account material totals with timestamps.
 - First Aid and cloth-reservation policies.
 - Mailbox guidance UI.
+- Suggest needed recipe/material transfers and general-purpose bags for empty bag slots.
+- Respect each sender's grocery reserves and clearly distinguish observed, stale,
+  unknown and in-transit inventory. Never guess a recipe's learning-item mapping.
 
 Acceptance criteria:
 
@@ -1222,4 +1229,3 @@ The first complete release is done when:
 - README and manual test documentation are complete.
 
 The agent should favour a reliable, explainable MVP over speculative integration with every possible Forever API. A user-visible manual control is preferable to an unreliable automatic inference.
-

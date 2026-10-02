@@ -31,14 +31,37 @@ function Service.Capture(sections, logout)
     end
     local snapshot = RQ.Util.Copy(record.snapshot)
     local now = RQ.Api.GetServerTime()
+    local logoutProgression = logout and collect("progression")
+    local cachedLogout = logout
+        and (
+            not RQ.Util.IsNumber(logoutProgression.level)
+            or logoutProgression.level < 1
+            or not RQ.Util.IsNumber(logoutProgression.xp)
+            or not RQ.Util.IsNumber(logoutProgression.xpMax)
+            or logoutProgression.xpMax < 1
+        )
+    if cachedLogout then
+        -- During client teardown, other APIs can also return plausible but empty values.
+        snapshot.lastLogout = now
+        local ok, err = RQ.Database.SaveSnapshot(snapshot)
+        if ok then
+            RQ.PlanningService.Logout(snapshot, true)
+            RQ.Api.Print("Logout XP unavailable or zero XP maximum; kept the last observed snapshot.")
+        end
+        return ok, err
+    end
     for section in pairs(sections or RQ.Snapshot.fields) do
-        RQ.Snapshot.Apply(snapshot, section, collect(section), now)
+        local values = section == "progression" and logoutProgression or collect(section)
+        RQ.Snapshot.Apply(snapshot, section, values, now)
     end
     snapshot.lastSeen = now or snapshot.lastSeen
     if logout then
         snapshot.lastLogout = now
     end
     local ok, err = RQ.Database.SaveSnapshot(snapshot)
+    if ok and not logout and (not sections or sections.bags) then
+        RQ.SuppliesService.ScanBags()
+    end
     if ok and logout then
         RQ.PlanningService.Logout(snapshot)
     end

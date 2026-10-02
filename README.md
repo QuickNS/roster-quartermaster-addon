@@ -5,14 +5,17 @@ The design is in [implementation-plan.md](implementation-plan.md).
 
 ## Current status
 
-Version `0.0.5` implements **Milestone 3: rested estimation and priority**, not the MVP:
+Version `0.0.6` includes Milestone 3 plus the requested recipe/grocery/mail-assistance
+foundation from Milestone 5. It is not the MVP:
 
 - Lua 5.1-compatible addon entry point and explicit TOC load order.
 - Capability-checked API adapter with visible missing, restricted, and failed API diagnostics.
 - Character GUID/name, realm/class/race, level, XP, rested XP, and resting-state probe.
-- Transactional migrations from schemas 1/2/3 to schema 4 and account-wide offline snapshots.
+- Transactional migrations from schemas 1/2/3/4 to schema 5 and account-wide offline snapshots.
 - Native minimap button with tooltip to open/close the roster dashboard.
-- Movable, scrollable window with saved position and Today/Roster/Settings/Planning tabs.
+- Movable, scrollable window with Today/Roster/Settings/Planning/Supplies tabs.
+- Copyable diagnostic/roster reports, unmodified full-name capture, and a manual name override.
+- Bag item ledgers, observed profession recipes, recipe-based milestone grocery lists, and manual mail proposals.
 - Offline rested estimates, configurable assumptions, bounded login calibration and manual perk reset.
 - Deterministic play-next recommendations with reasons, confidence, and pin/unpin overrides.
 - Character cards with identity, planned name, role/main, progression, professions, location, and freshness.
@@ -29,14 +32,15 @@ Version `0.0.5` implements **Milestone 3: rested estimation and priority**, not 
 The TOC targets interface `16001`, reported from Forever `1.60.1`, build `70170`
 (Oct 1 2026). The report covers installation, diagnostics/rescan, `/reload`, and
 full-restart persistence. Detailed API output and extended failure cases have
-not been individually confirmed. **The dashboard, minimap button, schema-4 upgrade,
-rested planning, and extended APIs still require in-client testing.** See [beta API notes](docs/BETA_API_NOTES.md) and the
+not been individually confirmed. **Schema-5 upgrades, copyable reports, full-name APIs,
+recipe/item scans, mail suggestions, and new UI still require in-client testing.** See [beta API notes](docs/BETA_API_NOTES.md) and the
 [manual test plan](docs/MANUAL_TEST_PLAN.md).
 
-Checklists, profession/material planning, item inventory scans, routing, and
-configuration import/export are not implemented yet. Next is Milestone 4: daily
-checklists. Profession skill capture is available, but targets and session
-objectives are explicitly shown as not configured until their planning milestones.
+Daily checklists, bank/mail contents, in-transit tracking, curated optimized
+Forever profession guides, category-wide routing policies, and configuration
+import/export remain future work. The initial planner uses a user-selected recipe
+and skill target, not an invented optimal leveling route. Session objectives
+remain a later milestone.
 
 ## Installation for compatibility testing
 
@@ -85,7 +89,7 @@ the missing module is still necessary to restore the registration window.
 ### Upgrading and registering
 
 Back up your account and per-character addon SavedVariables while the client is
-closed before upgrading. Schemas 1, 2 and 3 migrate automatically to schema 4 on login;
+closed before upgrading. Schemas 1 through 4 migrate automatically to schema 5 on login;
 keep the backup if you need to downgrade. Future or malformed schemas disable
 writes without replacing the original data.
 
@@ -182,6 +186,11 @@ The initial values are **unverified assumptions**, not Forever facts:
 
 Offline estimates require a complete, timestamped logout observation. Missing
 evidence stays unknown rather than projecting from a possibly mid-session cache.
+If logout APIs have become unavailable or report a zero XP maximum, the final
+scan preserves the earlier snapshot instead of overwriting it with teardown zeros.
+Complete earlier observations can supply a **cached logout baseline**, explicitly
+labelled LOW confidence. Accumulation starts at logout, not the earlier scan.
+Incomplete earlier evidence stays unknown with a specific explanation.
 Logout in an inn and switch to another character to see the estimate. Active
 rested XP comes directly from the game API; it never falls back to cached data.
 Offline estimates are LOW confidence with assumptions/stale baselines, or MEDIUM
@@ -193,12 +202,96 @@ and positive accumulation is below the configured caps. Up to eight samples per
 resting location are averaged, and only the latest comparison is retained.
 Rescan/entering-world events do not calibrate again. `/rq diag` reports sample counts
 and accepted/rejected reasons; Today also shows the last comparison.
+Cached fallback baselines are not used to learn rates because unobserved changes
+before logout could distort calibration.
+
+If version 0.0.5 saved an offline character with `0/0` XP and empty money/bag/profession
+data, update the complete addon, revisit that character, and use `/rq rescan` once
+loaded into the world. Verify its live values before switching characters. Lost
+observations cannot be reconstructed from zeros; do not reset SavedVariables.
 
 After a relevant perk change, update the rate multiplier or use **Reset calibration**,
 then log out to establish a new baseline. Perk detection is manual; no Legacy API
 contract is assumed. Changed global mechanics clear learned rates while retaining
 valid observed logout data for estimates under the new assumptions. Blocker and
 dungeon signals are also manual until later inventory/quest milestones.
+
+### Copy reports and full character names
+
+Click **Copy report** or run `/rq copy`. The scrollable text window selects the
+report; press **Ctrl+C** and paste it outside the game. **Select all** selects it
+again. Editing this text never changes saved data. Reports include character
+names, GUIDs, realms, snapshots, and grocery targets: review them before sharing.
+This is a troubleshooting report, not a configuration backup/import format.
+
+The adapter prefers `UnitNameUnmodified("player")` over the UI-modified name.
+The name API's realm return is **never** treated as a surname. GUIDs remain the
+canonical identity, and full names are used in cards, pin lookup, reports and mail
+proposals. `/rq copy` includes the observed outputs of the three name APIs for
+client verification. If the client still returns a shortened name, set an explicit
+override on that character:
+
+```text
+/rq fullname Quick Slam
+```
+
+The override persists until replaced; update it after a rename. Planned slot names
+remain separate intentions and never substitute for actual recipient names.
+
+### Professions, groceries and manual mail assistance
+
+1. Visit each registered character and `/rq rescan` after loading into the world.
+   Bag contents are scanned on login/rescan and debounced bag updates, not per frame.
+2. Open **each profession window**. Ready, owned profession recipe lists are cached
+   independently; linked/guild lists are never recorded as your known recipes.
+   `/rq scan-recipes` retries the open profession. Missing APIs retain old data
+   with an error rather than claiming a successful empty scan.
+3. Use `/rq recipes [member]` to inspect/copy recipe IDs, known/unlearned status,
+   observed reagents, and game-provided acquisition information. Unscanned
+   professions and unavailable acquisition details remain unknown.
+4. Choose a recipe to focus on and a skill milestone:
+
+   ```text
+   /rq goal <profession ID> <recipe ID> <target skill> [member]
+   ```
+
+   Use the IDs from your observed recipe report, not guessed retail recipes.
+   For example, select a Tailoring recipe and target skill 150. Required crafts
+   are estimated from the remaining skill points and API-reported skill-ups
+   (one per craft if unavailable). Skill gains are **not guaranteed**; this is a
+   material estimate, not an optimized guide. Skill and bag updates recalculate
+   shortages. Change the selected recipe as your chosen guide recommends.
+   Target skill 0 clears that profession's goal.
+5. Add independent minimum-stock needs by item ID:
+
+   ```text
+   /rq need 2589 40 priest
+   ```
+
+   This example marks 40 Linen Cloth as the linked Priest's target stock. Verify
+   the item ID in this client. Quantity 0 clears a need. Recipe requirements are
+   summed across goals, then combined with explicit stock targets using the larger
+   amount, avoiding duplicate requirements for the same stock.
+6. Open **Supplies** or `/rq supplies [member]` for the grocery list. It subtracts
+   observed bag stock from targets and displays unknown/stale inventories honestly.
+   Missing/alternative reagent data does not produce guessed material requirements.
+7. Open the mailbox and run `/rq mail`. The assistant proposes item quantities and
+   full recipients for grocery shortages, empty equipped bag slots, and unlearned
+   recipes **when an observed acquisition item link identifies the recipe item**.
+   Unmapped recipe scrolls require an explicit `/rq need` rather than guessing.
+   Bag proposals are for general-purpose bags and empty slots; verify their size.
+
+The sender's own grocery needs, empty bag slots, and identified unlearned recipe
+copies are reserved first. Remaining stock is allocated deterministically between
+recipients without counting the same source stack twice. Bound, locked, and
+unknown-binding stacks are excluded. Ignored characters are not destinations.
+
+**Nothing is attached, addressed, or sent automatically.** Verify the full recipient
+name, realm/faction mail rules, binding, and quantities yourself. These are bag-only
+suggestions: bank, mailbox, auctions, and in-transit items are not counted. Receiving
+characters must collect mail and refresh their bags; otherwise another sender may
+still see an outstanding need. Stale recipient inventories and recipe evidence
+require manual confirmation.
 
 ## Commands
 
@@ -210,6 +303,14 @@ dungeon signals are also manual until later inventory/quest milestones.
 | `/rq pin <name\|slot\|ID>` | Pin an enabled member as play-next; ambiguous names are rejected. |
 | `/rq unpin` | Clear the account-wide pin. |
 | `/rq diag` | Print capabilities, registration, schemas, saved section timestamps and observed values. |
+| `/rq copy` | Open selectable diagnostics, roster and grocery text for Ctrl+C. |
+| `/rq fullname <full name>` | Set an explicit actual-name override for the current character. |
+| `/rq recipes [member]` | View/copy observed recipes, IDs, materials and acquisition sources. |
+| `/rq scan-recipes` | Scan the currently open, owned profession window. |
+| `/rq supplies [member]` | Open Supplies, or a member's selectable grocery report. |
+| `/rq need <item ID> <quantity> [member]` | Set minimum stock; quantity 0 clears it. |
+| `/rq goal <profession ID> <recipe ID> <target skill> [member]` | Focus a profession milestone on an observed recipe; skill 0 clears it. |
+| `/rq mail` | Refresh active bags and show manual transfer suggestions. |
 | `/rq rescan` | Refresh the current snapshot; unavailable fields retain their old values with incomplete markers. |
 | `/rq roster` | Open the Roster tab. |
 | `/rq roster text` | Print account snapshots, excluding ignored characters. |
@@ -227,7 +328,8 @@ dungeon signals are also manual until later inventory/quest milestones.
 | `/rq name <slot> <planned name>` | Edit a provisional display name, preserving actual identity. |
 
 Diagnostics contain your current character name, GUID, and realm. Review them
-before sharing. They do not dump SavedVariables or inventory.
+before sharing. Reports do not serialize SavedVariables; grocery/recipe reports can
+include item quantities and profession information.
 
 Never-observed data is displayed as `unavailable`, not as fabricated
 level/XP/resting state. Failed refreshes retain prior values but mark the affected
@@ -242,10 +344,23 @@ An unavailable or failing function returns unknown rested XP instead.
 
 ## Development and testing
 
+The included [.devcontainer](.devcontainer/devcontainer.json) installs Python 3,
+Lua 5.1, Luacheck, and StyLua 2.5.2. In VS Code with the Dev Containers extension,
+run **Dev Containers: Reopen in Container**. Creation runs the Lua tests.
+No Python packages or runtime addon dependencies are required.
+
+To reproduce validation directly with Docker:
+
+```sh
+docker build -t roster-quartermaster-dev:local .devcontainer
+docker run --rm -v "$PWD:/workspace:ro" -w /workspace roster-quartermaster-dev:local \
+  bash -c 'lua5.1 Tests/run.lua && luacheck Core Data Models Services UI Bootstrap.lua Tests && stylua --check Core Data Models Services UI Bootstrap.lua Tests'
+```
+
 There are no runtime dependencies. Development tools:
 
 - Lua 5.1 (`lua5.1`, `luac5.1`).
-- Luacheck (tested with 0.25.0).
+- Luacheck (tested with 0.25.0 and the devcontainer's 1.1.2).
 - StyLua with Lua 5.1 support (tested with 2.5.2).
 
 Run from this directory:
@@ -287,7 +402,7 @@ RosterQuartermaster/
 From the staging directory, run:
 
 ```sh
-zip -r RosterQuartermaster-0.0.5.zip RosterQuartermaster
+zip -r RosterQuartermaster-0.0.6.zip RosterQuartermaster
 ```
 
 Do not ship tests, toolchains, repository metadata, or development configuration.

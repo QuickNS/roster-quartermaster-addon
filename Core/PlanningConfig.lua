@@ -79,6 +79,9 @@ function Config.PrepareState(value)
         return nil, "Rested state must be a table."
     end
     local state = RQ.Util.Copy(value or {})
+    if state.logoutReason ~= nil and not RQ.Util.IsText(state.logoutReason) then
+        return nil, "Invalid rested logout reason."
+    end
     if state.calibration == nil then
         state.calibration = { profile = "", inside = {}, outside = {} }
     end
@@ -109,6 +112,14 @@ function Config.PrepareState(value)
             or sample.revision % 1 ~= 0
         then
             return nil, "Invalid rested logout bounds."
+        end
+        if sample.cached ~= nil and type(sample.cached) ~= "boolean" then
+            return nil, "Invalid cached logout flag."
+        end
+        if sample.observedAt ~= nil or sample.cached then
+            if not RQ.Util.IsNumber(sample.observedAt) or sample.observedAt == 0 or sample.observedAt > sample.at then
+                return nil, "Invalid logout observation timestamp."
+            end
         end
     end
     if state.comparison ~= nil then

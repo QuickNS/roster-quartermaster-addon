@@ -28,6 +28,76 @@ return function(h)
         equal(record.snapshot.professions[186].skill, 100)
     end)
 
+    test("logout teardown zeros cannot replace the last valid character snapshot", function()
+        start()
+        _G.GetServerTime = function()
+            return 123456900
+        end
+        _G.UnitXP = function()
+            return 0
+        end
+        _G.UnitXPMax = function()
+            return 0
+        end
+        _G.GetMoney = function()
+            return 0
+        end
+        _G.GetContainerNumSlots = function()
+            return 0
+        end
+        _G.GetContainerNumFreeSlots = function()
+            return 0
+        end
+        _G.GetProfessions = function()
+            return nil
+        end
+        _G.GetXPExhaustion = function()
+            return nil
+        end
+        h.emit("PLAYER_LOGOUT")
+        local saved = RQCharDB.snapshot
+        equal(saved.xp, 12000)
+        equal(saved.xpMax, 40000)
+        equal(saved.money, 12345)
+        equal(saved.bagSlots, 32)
+        equal(saved.professions[186].skill, 100)
+        equal(saved.lastSeen, 123456789)
+        equal(saved.lastLogout, 123456900)
+        equal(saved.sections.progression.observedAt, 123456789)
+        local baseline = RQCharDB.restedState.logout
+        assert(baseline)
+        equal(baseline.cached, true)
+        equal(baseline.observedAt, 123456789)
+        equal(baseline.at, 123456900)
+        equal(baseline.restedXp, 20000)
+    end)
+
+    test("missing logout progression preserves cache while real zero balances remain valid", function()
+        start()
+        _G.GetMoney = function()
+            return 0
+        end
+        _G.GetProfessions = function()
+            return nil
+        end
+        h.emit("PLAYER_LOGOUT")
+        equal(RQCharDB.snapshot.money, 0)
+        equal(next(RQCharDB.snapshot.professions), nil)
+        equal(RQCharDB.restedState.logout.cached, false)
+        _G.UnitXPMax = nil
+        _G.GetMoney = function()
+            error("must not scan after logout progression becomes unavailable")
+        end
+        h.emit("PLAYER_LOGOUT")
+        equal(RQCharDB.snapshot.xpMax, 40000)
+        equal(RQCharDB.restedState.logout.cached, true)
+        _G.GetServerTime = nil
+        h.emit("PLAYER_LOGOUT")
+        equal(RQCharDB.restedState.logout, nil)
+        equal(RQCharDB.restedState.logoutReason, "Logout timestamp unavailable")
+        equal(RQCharDB.snapshot.xp, 12000)
+    end)
+
     test("noisy events coalesce and only scan their affected sections", function()
         start()
         local counts = { bags = 0, money = 0, professions = 0, xp = 0 }
