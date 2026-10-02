@@ -21,6 +21,33 @@ function Util.IsNumber(value)
     return type(value) == "number" and value == value and value >= 0 and value < math.huge
 end
 
+function Util.IsFinite(value)
+    return type(value) == "number" and value == value and value > -math.huge and value < math.huge
+end
+
+function Util.DefaultWindowPosition()
+    return { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 }
+end
+
+function Util.IsWindowPosition(value)
+    local points = {
+        TOPLEFT = true,
+        TOP = true,
+        TOPRIGHT = true,
+        LEFT = true,
+        CENTER = true,
+        RIGHT = true,
+        BOTTOMLEFT = true,
+        BOTTOM = true,
+        BOTTOMRIGHT = true,
+    }
+    return type(value) == "table"
+        and points[value.point] == true
+        and points[value.relativePoint] == true
+        and Util.IsFinite(value.x)
+        and Util.IsFinite(value.y)
+end
+
 function Util.IsText(value)
     return type(value) == "string" and value:match("%S") ~= nil
 end

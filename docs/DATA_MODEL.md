@@ -1,13 +1,14 @@
-# SavedVariables schema 2
+# SavedVariables schema 3
 
 `RQDB` is account-wide; `RQCharDB` is per-character. Both declare
-`schemaVersion = 2`. Initialization happens after SavedVariables load.
+`schemaVersion = 3`. Initialization happens after SavedVariables load.
 
 ## Account state
 
 | Field | Purpose |
 | --- | --- |
 | `settings` | Existing settings and user extensions are preserved. |
+| `settings.window` | Native window anchor: `point`, `relativePoint`, finite signed `x`/`y` offsets. |
 | `policies.staleSnapshotHours` | Non-negative threshold, default 48 hours. |
 | `plannedRoster[slotId]` | Editable planning configuration, seeded once from `Data/DefaultRoster.lua`. |
 | `roster[characterId]` | Confirmed member configuration plus observed identity fields. |
@@ -76,8 +77,16 @@ current character's snapshot.
   the saved-data conflict with explicit user approval.
 - Provisional names are never used for matching. A new snapshot starts pending;
   only a user action makes it a roster member or links a slot.
-- Ignore stops snapshot updates and excludes the record from roster output.
-  Existing member configuration and links are retained for explicit re-enabling.
+- Ignore stops snapshot updates and excludes the record from text roster output.
+  The dashboard keeps an ignored card for explicit re-enabling. Existing role
+  configuration and links are retained, but the main designation is cleared.
+- Main selection clears other member and provisional-main flags. Linking another
+  character never overrides an existing explicitly selected main.
+- Role changes update the member and its linked provisional slot. Offline
+  configuration uses the stored character ID and never captures active APIs into
+  that character's snapshot.
+- Unlink releases the slot but preserves the member, role, main choice, and
+  snapshot. Reassigning requires this explicit unlink before linking elsewhere.
 
 Fallback-only renames cannot be reconciled safely without additional identity
 evidence. GUID rename behavior is covered by tests.
@@ -102,9 +111,9 @@ a money update does not make old profession or bag data current.
 
 ## Migration and corruption handling
 
-`Migrations.Prepare` copies both roots, accepts schema 1 or 2 (or missing version
+`Migrations.Prepare` copies both roots, accepts schema 1, 2, or 3 (or missing version
 on a partial database), fills absent containers, seeds absent provisional
-configuration, validates shapes/values/link consistency, and stamps schema 2.
+configuration, validates shapes/values/link consistency, and stamps schema 3.
 It is idempotent and preserves unknown fields and non-nil user configuration.
 It does not fabricate an observation timestamp for schema-1 snapshots.
 
@@ -112,4 +121,16 @@ Only after both prepared roots pass validation does `Database.Initialize`
 publish them. Unsupported schemas and invalid consumed fields disable all
 persistence with explicit diagnostics; neither original root is overwritten.
 Back up both SavedVariables files before upgrading. Schema 1 code cannot read
-schema 2, so downgrade by restoring that backup, not by changing version numbers.
+newer schemas, so downgrade by restoring that backup, not by changing version numbers.
+
+Schema 3 adds a validated `settings.window` position, defaulting to a centered
+anchor with zero offsets. Migration preserves already valid positions and repairs
+missing position fields; malformed coordinates or anchors disable writes instead
+of resetting user data. Older roster entries missing only their account snapshot
+receive a record with unknown observations so they remain visible/configurable;
+no level, timestamp, or inventory amount is invented.
+
+The native window clamps itself to the screen when restored. UI frame references,
+selected tabs/rows, drafts, minimap widgets, and refresh callbacks are runtime-only;
+they are never written to SavedVariables. The minimap launcher has a fixed
+lower-left anchor and adds no persistence fields.

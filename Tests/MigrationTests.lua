@@ -11,7 +11,7 @@ return function(h)
         local oldAccount, oldCharacter = RQDB, RQCharDB
         h.loadAddon()
         assert(RQ.Database.Initialize())
-        equal(RQDB.schemaVersion, 2)
+        equal(RQDB.schemaVersion, 3)
         equal(RQDB.settings.custom[1], 42)
         equal(RQDB.policies.staleSnapshotHours, 12)
         equal(RQCharDB.snapshot.level, 17)
@@ -36,7 +36,7 @@ return function(h)
         local second, char = RQ.Migrations.Prepare(account, character)
         equal(second.plannedRoster.druid.plannedName, "Luna Tick")
         equal(second.plannedRoster.rogue, nil)
-        equal(char.schemaVersion, 2)
+        equal(char.schemaVersion, 3)
         second.plannedRoster = {}
         local third = RQ.Migrations.Prepare(second, char)
         equal(next(third.plannedRoster), nil)
@@ -70,8 +70,8 @@ return function(h)
     end)
 
     test("current-schema partial records are repaired conservatively", function()
-        RQDB = { schemaVersion = 2, characters = { ["Player-Old"] = { snapshot = { lastSeen = 1 } } } }
-        RQCharDB = { schemaVersion = 2 }
+        RQDB = { schemaVersion = 3, characters = { ["Player-Old"] = { snapshot = { lastSeen = 1 } } } }
+        RQCharDB = { schemaVersion = 3 }
         h.loadAddon()
         assert(RQ.Database.Initialize())
         local record = RQDB.characters["Player-Old"]

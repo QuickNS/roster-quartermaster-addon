@@ -1,6 +1,16 @@
 local Character = {}
 RQ.Character = Character
 
+Character.roles = { "UNASSIGNED", "TANK", "HEALER", "DPS", "HEALER_DPS", "FLEX" }
+Character.roleLabels = {
+    UNASSIGNED = "Unassigned",
+    TANK = "Tank",
+    HEALER = "Healer",
+    DPS = "DPS",
+    HEALER_DPS = "Healer / DPS",
+    FLEX = "Flexible",
+}
+
 function Character.FallbackId(identity)
     if not RQ.Util.IsText(identity.displayName) or not RQ.Util.IsText(identity.realm) then
         return nil

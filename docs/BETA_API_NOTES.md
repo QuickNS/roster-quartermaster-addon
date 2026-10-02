@@ -26,6 +26,10 @@ directory had been omitted from the installation. Omitting the module in the tes
 reproduced the same exception. Version 0.0.3 removes the slash-command dependency
 on that module and reports its absence. In-client confirmation is pending.
 
+Version 0.0.4 adds the roster dashboard and requested native minimap launcher.
+Its UI, geometry, schema-3 upgrade, and configuration interactions have been
+tested with mocked frames only; visual compatibility in Forever remains pending.
+
 No diagnostic transcript or separate per-test results were supplied. Individual
 API return values, event delivery details, and extended failure cases remain
 unconfirmed. No direct client access was available during implementation.
@@ -70,6 +74,11 @@ individually confirmed; it does not mean the smoke test failed.
 | `C_Timer.After(seconds, callback)` | One-shot event coalescing | New in 0.0.2; unverified |
 | `InCombatLockdown()` | Boolean combat-lockdown state | New in 0.0.2; unverified |
 | Native frames, textures, `GameFontNormal`, `UIPanelButtonTemplate` | Registration choices; guarded construction | New in 0.0.2; unverified |
+| `Minimap`, button textures, `GameTooltip` | Fixed lower-left launcher, click toggle and hover tooltip | New in 0.0.4; unverified |
+| `UIPanelScrollFrameTemplate`, `SetScrollChild`, vertical scrolling | Roster card viewport | New in 0.0.4; unverified |
+| `InputBoxTemplate`, focus, Enter/Escape handlers | Planned-name editing without overwriting focused drafts | New in 0.0.4; unverified |
+| `SetMovable`, drag scripts, `GetPoint`, `SetClampedToScreen` | Saved/restored account window position | New in 0.0.4; unverified |
+| `UISpecialFrames` | Escape registration for the native `RQMainWindow` frame | New in 0.0.4; unverified |
 
 There is deliberately no guessed clock fallback or invented client-flavour
 identifier. Missing GUIDs use a normalized actual name/realm fallback when both
@@ -90,6 +99,12 @@ present, with legacy methods used only when their modern counterpart is absent.
 
 No combat-state API means no registration popup; chat commands still work.
 Failed native widget creation is reported and falls back to chat instructions.
+The dashboard likewise refuses to open without a known out-of-combat state and
+hides on combat entry. A failed native dashboard initialization stays disabled
+for that session; use text commands and reload after correcting the installation.
+If `UISpecialFrames` is absent, the Close button and `/rq close` remain available.
+If `Minimap` is absent, `/rq` still works and launcher detection retries on
+`PLAYER_ENTERING_WORLD`. A missing `GameTooltip` does not disable the launcher.
 
 ## Events
 
@@ -124,14 +139,14 @@ No per-frame polling is performed. Quest, bank, and mail events are deferred.
 independent account-wide character snapshots, explicit registration status,
 provisional slot links, and per-character current-state copies.
 
-- Nil and structurally valid partial databases initialize at schema 2.
-- Schema 1 migrates to schema 2 on copied data; both roots are validated before
+- Nil and structurally valid partial databases initialize at schema 3.
+- Schemas 1/2 migrate to schema 3 on copied data; both roots are validated before
   either is replaced. The migration is idempotent.
 - Unknown fields are preserved during initialization.
 - Invalid table shapes or any explicit unsupported schema disable writes to
   **both** databases. The originals are retained, with an explicit diagnostic.
-- Downgrading to 0.0.1 requires restoring the pre-upgrade backup; schema 2 is not
-  understood by the old version. Future changes require idempotent migrations.
+- Downgrading requires restoring the pre-upgrade backup; schema 3 is not
+  understood by earlier versions. Future changes require idempotent migrations.
 - A successful initializer means only that the in-memory tables are ready. It
   does not prove the client wrote them to disk.
 
@@ -160,6 +175,16 @@ provisional slot links, and per-character current-state copies.
 | Targeted XP/resting/location/money/bag/profession events | Not run in client |
 | Registration popup, combat deferral, and slash fallback | Not run in client |
 | Reload/restart with account-wide snapshots and links | Not run in client |
+
+### Version 0.0.4 client observations
+
+| Check | Observed result |
+| --- | --- |
+| Native minimap button location, icon, tooltip and click toggle | Not run in client |
+| Roster/Settings tabs, card layout and scrolling | Not run in client |
+| Main, role, planned-name editing, offline controls and unlink/relink | Not run in client |
+| Schema-3 upgrade and window position across reload/restart | Not run in client |
+| Combat hiding, Escape/Close, and unavailable-UI fallback | Not run in client |
 
 If persistence fails, record the exact build and whether the failure occurs on
 reload, clean exit, or both. Do not describe data as durable until tested.

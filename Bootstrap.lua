@@ -35,6 +35,32 @@ local function showRegistration(force)
     end
 end
 
+local function openDashboard(tab, toggle)
+    if RQ.MainWindow then
+        if RQ.MainWindow.Open(tab, toggle) then
+            RQ.Api.HideRegistrationPrompt()
+            return
+        end
+    else
+        RQ.Api.Print("Dashboard module did not load; reinstall all UI files and the TOC. Showing text roster.")
+    end
+    RQ.Diagnostics.Roster()
+end
+
+local minimapWarning = false
+local function ensureMinimapButton()
+    if not RQ.Api.CreateMinimapButton(function()
+        openDashboard(nil, true)
+    end) and not minimapWarning then
+        RQ.Api.Print("Minimap launcher unavailable; use /rq and check /rq diag.")
+        minimapWarning = true
+    end
+end
+
+local function configurationResult(ok, err)
+    RQ.Api.Print(ok and "Roster configuration saved." or "Configuration not changed: " .. err)
+end
+
 local function onEvent(event, argument)
     RQ.Api.MarkEventObserved(event)
     if event == "ADDON_LOADED" then
@@ -46,16 +72,19 @@ local function onEvent(event, argument)
             refresh()
             showRegistration()
         end
-        RQ.Api.Print("Roster snapshots loaded. Use /rq roster or /rq diag; the dashboard is not implemented yet.")
+        ensureMinimapButton()
+        RQ.Api.Print("Roster ready. Click the RQ minimap button or use /rq; /rq diag shows API status.")
     elseif event == "PLAYER_LOGOUT" then
         RQ.SnapshotService.Logout()
     elseif event == "PLAYER_ENTERING_WORLD" then
+        ensureMinimapButton()
         if RQ.Database.initialized then
             refresh()
             showRegistration()
         end
     elseif event == "PLAYER_REGEN_DISABLED" then
         RQ.Api.HideRegistrationPrompt()
+        RQ.Api.HideRosterWindow()
     elseif event == "PLAYER_REGEN_ENABLED" then
         showRegistration()
     elseif eventSections[event] then
@@ -68,7 +97,9 @@ end
 RQ.Api.RegisterSlashCommand(function(message)
     local command, argument = (message or ""):match("^%s*(%S*)%s*(.-)%s*$")
     command = command:lower()
-    if command == "" or command == "diag" then
+    if command == "" then
+        openDashboard(nil, true)
+    elseif command == "diag" then
         RQ.Diagnostics.Report()
     elseif command == "rescan" then
         if not RQ.Database.initialized then
@@ -87,7 +118,33 @@ RQ.Api.RegisterSlashCommand(function(message)
     elseif command == "add" or command == "ignore" or command == "link" then
         RQ.SnapshotService.Register(command, argument:lower())
     elseif command == "roster" then
-        RQ.Diagnostics.Roster()
+        if argument:lower() == "text" then
+            RQ.Diagnostics.Roster()
+        else
+            openDashboard("roster")
+        end
+    elseif command == "settings" then
+        openDashboard("settings")
+    elseif command == "close" then
+        RQ.Api.HideRosterWindow()
+    elseif command == "main" then
+        configurationResult(RQ.Database.SetMain(argument ~= "" and argument or RQ.Database.activeId))
+    elseif command == "role" then
+        local role, id = argument:match("^(%S+)%s*(.-)$")
+        if not role then
+            RQ.Api.Print("Usage: /rq role <UNASSIGNED|TANK|HEALER|DPS|HEALER_DPS|FLEX> [character ID]")
+            return
+        end
+        configurationResult(RQ.Database.SetRole(id ~= "" and id or RQ.Database.activeId, role:upper()))
+    elseif command == "unlink" then
+        configurationResult(RQ.Database.Unlink(argument ~= "" and argument or RQ.Database.activeId))
+    elseif command == "reset-window" then
+        local ok, err = RQ.Database.SaveWindowPosition(RQ.Util.DefaultWindowPosition())
+        if not ok then
+            RQ.Api.Print("Window position not changed: " .. err)
+        elseif RQ.Api.ResetRosterWindowPosition() then
+            RQ.Api.Print("Window position reset to center.")
+        end
     elseif command == "slots" then
         RQ.Diagnostics.Slots()
     elseif command == "name" then
@@ -100,8 +157,8 @@ RQ.Api.RegisterSlashCommand(function(message)
         RQ.Api.Print(ok and "Planned name updated." or "Name not changed: " .. err)
     else
         RQ.Api.Print(
-            "Available commands: /rq diag, rescan, roster, slots, register, add, link <slot>, ignore, "
-                .. "name <slot> <name>."
+            "Available commands: /rq, diag, rescan, roster [text], settings, close, slots, register, add, "
+                .. "link <slot>, ignore, name <slot> <name>, main [ID], role <role> [ID], unlink [ID], reset-window."
         )
     end
 end)

@@ -5,12 +5,16 @@ The design is in [implementation-plan.md](implementation-plan.md).
 
 ## Current status
 
-Version `0.0.3` implements **Milestone 1: database and snapshots**, not the MVP:
+Version `0.0.4` implements **Milestone 2: roster dashboard**, not the MVP:
 
 - Lua 5.1-compatible addon entry point and explicit TOC load order.
 - Capability-checked API adapter with visible missing, restricted, and failed API diagnostics.
 - Character GUID/name, realm/class/race, level, XP, rested XP, and resting-state probe.
-- Transactional schema-1 to schema-2 migration and account-wide offline snapshots.
+- Transactional migrations from schemas 1/2 to schema 3 and account-wide offline snapshots.
+- Native minimap button with tooltip to open/close the roster dashboard.
+- Movable, scrollable roster window with saved position and Roster/Settings tabs.
+- Character cards with identity, planned name, role/main, progression, professions, location, and freshness.
+- Main/role configuration, explicit unlink/relink, and offline-member controls.
 - Explicit add/link/ignore registration with a small combat-safe prompt and slash fallback.
 - Five editable provisional roster slots; names never trigger automatic links.
 - Money, location, bag-capacity, and profession observations when APIs expose them.
@@ -23,15 +27,15 @@ Version `0.0.3` implements **Milestone 1: database and snapshots**, not the MVP:
 The TOC targets interface `16001`, reported from Forever `1.60.1`, build `70170`
 (Oct 1 2026). The report covers installation, diagnostics/rescan, `/reload`, and
 full-restart persistence. Detailed API output and extended failure cases have
-not been individually confirmed. **The new 0.0.2 migration, registration UI,
-events, and APIs still require in-client testing.** See [beta API notes](docs/BETA_API_NOTES.md) and the
+not been individually confirmed. **The dashboard, minimap button, schema-3 upgrade,
+and extended APIs still require in-client testing.** See [beta API notes](docs/BETA_API_NOTES.md) and the
 [manual test plan](docs/MANUAL_TEST_PLAN.md).
 
-The roster dashboard, recommendations, offline rested estimates, checklists,
+Recommendations, offline rested estimates, checklists,
 profession planning, item inventory scans, routing, and configuration import/export
-are not implemented yet. Next is Milestone 2: the roster dashboard and richer
-configuration controls. Profession skill capture is available, but recipe
-discovery and profession planning are not.
+are not implemented yet. Next is Milestone 3: rested estimation and play-next
+recommendations. Profession skill capture is available, but targets and session
+objectives are explicitly shown as not configured until their planning milestones.
 
 ## Installation for compatibility testing
 
@@ -55,7 +59,8 @@ discovery and profession planning are not.
    `Models/`, `Services/`, and `UI/` into it. **When upgrading from 0.0.1, copy the
    new directories too.** The TOC must be directly inside that directory, not
    in an extra nested folder.
-4. Enable the addon and log in. Use `/rq diag`.
+4. Enable the addon and log in. Click the **RQ minimap button** or use `/rq`
+   to open the dashboard. Use `/rq diag` for diagnostics.
 5. Follow the manual reload/restart tests. Back up existing SavedVariables before
    testing beta builds. There is no configuration export/import yet.
 
@@ -79,7 +84,7 @@ the missing module is still necessary to restore the registration window.
 ### Upgrading and registering
 
 Back up your account and per-character addon SavedVariables while the client is
-closed before upgrading. Schema 1 migrates automatically to schema 2 on login;
+closed before upgrading. Schemas 1 and 2 migrate automatically to schema 3 on login;
 keep the backup if you need to downgrade. Future or malformed schemas disable
 writes without replacing the original data.
 
@@ -109,19 +114,57 @@ name-and-realm key is used and promoted to the GUID once available. Name-only
 fallbacks cannot reliably reconcile renames; the addon does not guess.
 Conflicting fallback/GUID records are preserved and reported rather than merged.
 
-Ignored characters stop snapshot updates and are omitted from `/rq roster`.
-Their existing configuration and slot link are retained. Use `/rq register` and
-choose Add (or `/rq add`) to resume. Members already linked to one slot cannot
-silently claim a different one; reassignment controls are deferred.
+Ignored characters stop snapshot updates and are omitted from `/rq roster text`.
+They remain visible as ignored in the dashboard so you can resume them without
+editing Lua tables. Existing role configuration and links are retained; ignoring
+the main clears that main designation. Use Add / resume in Settings, `/rq register`,
+or `/rq add` to resume.
+
+### Using the dashboard
+
+- Click the **RQ** button at the lower-left edge of the stock minimap to toggle
+  the window. It has a hover tooltip and uses no external library. Its minimap
+  position is currently fixed.
+- `/rq` also toggles the window; `/rq roster` and `/rq settings` open a specific
+  tab. **`/rq` no longer prints diagnostics; use `/rq diag` for that.**
+- Drag the window background/title to move it. The position is saved account-wide.
+  **Center** or `/rq reset-window` restores the default position.
+- Scroll the Roster tab with the mouse wheel or scrollbar. Cards show offline
+  values as last observed, including incomplete/stale warnings, not live estimates.
+- Click **Configure** on a character, or choose a character with Previous/Next
+  in Settings. The selector includes pending and ignored characters.
+- Use Add / resume, Ignore, Make main, and the role-cycle button to configure
+  that character. There is at most one newly selected main; later links do not
+  override that explicit choice.
+- Select a provisional slot separately, edit its planned name and press Enter
+  or Save name, then explicitly link it. Occupied slots cannot be overwritten.
+  To move a linked character to another slot, **Unlink slot** first.
+- Offline configuration changes do not scan, log into, or select that character
+  in the client. **Rescan current** always scans the logged-in character.
+- Close with **Close**, Escape (when native Escape registration is available),
+  `/rq`, or `/rq close`. Entering combat hides the dashboard; it does not reopen
+  automatically afterward. A minimap click during combat shows text guidance.
+- If the stock minimap or native window APIs are unavailable, use `/rq roster text`
+  and the configuration slash commands. Diagnostics report the missing capability.
+
+Hidden dashboards are not rebuilt on snapshot events. Visible updates are
+coalesced, and a focused planned-name draft is not overwritten by live updates.
 
 ## Commands
 
 | Command | Current behavior |
 | --- | --- |
-| `/rq` | Print diagnostics; the main dashboard is not implemented yet. |
+| `/rq` | Toggle the roster dashboard (text fallback if unavailable). |
 | `/rq diag` | Print capabilities, registration, schemas, saved section timestamps and observed values. |
 | `/rq rescan` | Refresh the current snapshot; unavailable fields retain their old values with incomplete markers. |
-| `/rq roster` | List account characters, registration status, saved values, timestamps, and stale/incomplete warnings. |
+| `/rq roster` | Open the Roster tab. |
+| `/rq roster text` | Print account snapshots, excluding ignored characters. |
+| `/rq settings` | Open roster configuration controls. |
+| `/rq close` | Close the dashboard. |
+| `/rq reset-window` | Reset saved window position to center. |
+| `/rq main [character ID]` | Make an enabled member the main; defaults to the current character. |
+| `/rq role <role> [character ID]` | Set UNASSIGNED, TANK, HEALER, DPS, HEALER_DPS, or FLEX. |
+| `/rq unlink [character ID]` | Release a provisional link without deleting the character snapshot. |
 | `/rq slots` | List provisional slot IDs, editable planned names, and existing links. |
 | `/rq register` | Reopen registration, including for ignored characters. |
 | `/rq add` | Add or re-enable the current character without guessing a slot. |
@@ -190,7 +233,7 @@ RosterQuartermaster/
 From the staging directory, run:
 
 ```sh
-zip -r RosterQuartermaster-0.0.3.zip RosterQuartermaster
+zip -r RosterQuartermaster-0.0.4.zip RosterQuartermaster
 ```
 
 Do not ship tests, toolchains, repository metadata, or development configuration.

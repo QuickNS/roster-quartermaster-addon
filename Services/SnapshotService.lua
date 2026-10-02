@@ -56,20 +56,25 @@ function Service.CancelPending()
     Service.generation = Service.generation + 1
 end
 
-function Service.Register(action, slotId)
-    local ok, err = RQ.Database.Register(action, slotId)
+function Service.Register(action, slotId, characterId)
+    local ok, err = RQ.Database.Register(action, slotId, characterId)
     if not ok then
         RQ.Api.Print("Registration failed: " .. err)
         return false
     end
-    Service.CancelPending()
-    if action ~= "ignore" then
+    local isCurrent = not characterId or characterId == RQ.Database.activeId
+    if isCurrent then
+        Service.CancelPending()
+    end
+    if action ~= "ignore" and isCurrent then
         local captured, captureError = Service.Capture()
         if not captured then
             RQ.Api.Print("Snapshot not saved: " .. captureError)
         end
     end
-    RQ.Api.HideRegistrationPrompt()
+    if isCurrent then
+        RQ.Api.HideRegistrationPrompt()
+    end
     RQ.Api.Print(
         action == "ignore" and "Character ignored. Use /rq register to reconsider."
             or "Roster registration saved. Use /rq roster."

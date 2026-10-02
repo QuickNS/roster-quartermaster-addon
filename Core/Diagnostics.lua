@@ -133,6 +133,11 @@ function Diagnostics.Report()
         "Last saved observation (server timestamp): " .. display(database.lastSeen),
         "Optional integrations: none loaded",
         "Registration UI module: " .. (RQ.RegistrationPrompt and "loaded" or "NOT LOADED; reinstall complete addon"),
+        "Dashboard modules: "
+            .. (
+                RQ.MainWindow and RQ.RosterPanel and RQ.CharacterCard and "loaded"
+                or "NOT LOADED; reinstall complete addon"
+            ),
     }
     local record = RQ.Database.Current()
     if record then

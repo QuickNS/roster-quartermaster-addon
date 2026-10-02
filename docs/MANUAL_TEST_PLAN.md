@@ -7,8 +7,9 @@ No separate results were supplied for the extended cases below, including
 second-character isolation, level-cap behavior, corrupt data, and combat.
 See [BETA_API_NOTES.md](BETA_API_NOTES.md) for the evidence and its limits.
 
-That report applies to **0.0.1**, not the new **0.0.2** features below.
-All Milestone 1 client tests are pending.
+That report applies to **0.0.1**, not the later features below. The missing-UI
+installation problem in 0.0.2 was identified separately. Complete Milestone 1/2
+acceptance results have not been reported; the 0.0.4 dashboard/minimap tests are pending.
 
 Back up SavedVariables before testing. Do not delete existing user data to
 simulate a clean installation; use a backed-up test profile instead.
@@ -17,13 +18,13 @@ simulate a clean installation; use a backed-up test profile instead.
 
 1. Obtain the client interface number and install as described in the README.
 2. Enable Lua error reporting through the client-supported settings.
-3. Log in. Confirm the roster-snapshots message appears without Lua errors.
-4. Run `/rq` and `/rq diag`. Confirm they display the same report.
+3. Log in. Confirm the roster-ready message appears without Lua errors.
+4. Run `/rq` to open the dashboard and `/rq diag` for the separate diagnostic report.
 5. Compare GUID/name, realm, class, level, XP, rested XP, and resting state against
    the client. Check the build/interface values against the installation evidence.
 6. Check that missing/failed APIs appear explicitly in the capability list.
    A reported numeric project ID must not be treated as confirmation of flavour.
-7. Confirm account and character schema versions are `2` and the SavedVariables
+7. Confirm account and character schema versions are `3` and the SavedVariables
    status is `initialized`.
 8. Confirm the login events are `observed`, while logout is not claimed observed
    before it has occurred.
@@ -48,11 +49,11 @@ Profession and bag APIs may be unavailable on the beta client. Expect an
 profession list or zero bag capacity. Older observations should be retained.
 Inventory bags/bank/mail and recipe sources remain unscanned in this milestone.
 
-## Schema-1 upgrade and registration
+## Upgrade and registration
 
 1. Close the client and back up both SavedVariables files. Keep the backup outside
    the addon directory. Install all runtime directories listed in the README.
-2. Log into a character used with 0.0.1. Confirm schema 2, retained custom settings
+2. Log into a character used with 0.0.1 or 0.0.2/0.0.3. Confirm schema 3, retained custom settings
    and prior logout timestamp, and a new account character record. Registration
    must remain pending until you choose; a matching planned name is not consent.
 3. Choose **Link** to the intended slot, or use `/rq link warrior` on the main.
@@ -63,7 +64,8 @@ Inventory bags/bank/mail and recipe sources remain unscanned in this milestone.
 6. Repeat across the five intended characters. From any one of them, `/rq roster`
    should display all five stored records, not just the active character.
 7. Use `/rq ignore` on a test character. Its snapshot should stop updating and it
-   should disappear from `/rq roster`, including after `/reload`.
+   should disappear from `/rq roster text`, including after `/reload`, while
+   remaining labeled ignored in the dashboard.
    Use `/rq register` followed by Add (or `/rq add`) to resume. Prior links remain.
 8. Choose **Decide later** on a pending character. Expect no further automatic
    prompts that login, but `/rq register` should reopen the choices.
@@ -80,6 +82,40 @@ Inventory bags/bank/mail and recipe sources remain unscanned in this milestone.
 3. In the test profile, make one section stale while the overall snapshot is
    recent. Confirm the section warning remains visible.
 4. Unavailable timestamps must display as unknown, not as fresh data.
+
+## Dashboard and minimap launcher
+
+1. Confirm one RQ button appears at the lower-left edge of the stock minimap.
+   Hover for the tooltip; click once to open the dashboard and again to close.
+   Changing zones must not create duplicate buttons.
+2. Confirm `/rq`, `/rq roster`, and `/rq settings` open the intended UI. Confirm
+   `/rq diag` and `/rq roster text` remain usable without the dashboard.
+3. Verify the 800x600 window at 1080p and the available ultrawide/UI-scale settings:
+   no clipped controls, readable labels, accessible scrollbar, and visible Close.
+4. Scroll through all known and provisional character cards. Check actual and
+   planned names, race/class, roles, main flag, XP, last-observed rested XP,
+   professions, location/resting state, timestamps, age, and uncertainty warnings.
+5. Click Configure on an offline card. Use Add / resume, Make main, and the role
+   button. Confirm only the selected character changes; the active snapshot and
+   logged-in character must not be replaced or switched.
+6. Verify only one new main selection remains. Linking the Warrior afterward
+   must not override that selection. Ignoring the main clears its main flag.
+7. Select a provisional slot, type a planned name, and press Enter or Save name.
+   Gain XP or money while the edit box is focused: the draft must not be replaced.
+   Switching slots should replace the draft with that slot's saved label.
+8. Confirm an occupied slot cannot be overwritten. Unlink explicitly, select
+   another free slot, and relink; retain the actual GUID and snapshot.
+9. Drag the window, close/open it, `/reload`, then fully restart. Verify the saved
+   position survives when client persistence works. Test Center and
+   `/rq reset-window`, including after changing screen size or UI scale.
+10. Close with Close, Escape, `/rq`, and `/rq close`. Enter combat with the window
+    open: it must hide and must not automatically reopen afterward. Minimap clicks
+    during combat should give text guidance, not open a popup.
+11. In a supported test/mocked environment, remove the stock minimap, tooltip,
+    or a dashboard template independently. Confirm capability warnings and
+    functioning slash fallback, with no broken registration commands.
+12. Check that hidden panels are not rebuilt on snapshot events. Visible panels
+    should update after events without losing the current selection.
 
 ## Reload and restart persistence
 
@@ -113,5 +149,5 @@ Do not report a full restart pass based on a successful `/reload`.
 5. Confirm there are no per-frame bag scans or background inventory work.
 6. Record actual results and client build in `BETA_API_NOTES.md`.
 
-The dashboard, planning logic, item-level bags/bank/mail, profession planning,
+Planning logic, item-level bags/bank/mail, profession planning,
 checklists, and import/export need separate acceptance tests as they are added.

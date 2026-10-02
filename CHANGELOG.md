@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.0.4 - Roster dashboard and minimap launcher
+
+- Added a native minimap button with hover tooltip to open/close the dashboard.
+- Added movable Roster/Settings tabs, scrollable character cards, and saved window
+  position with Close/Escape and reset controls.
+- Added main/role configuration, explicit unlink/relink, and offline-member
+  controls without logging into or scanning those characters.
+- Added age/stale/incomplete labels and retained last-observed offline rested XP
+  labeling; no offline estimation is claimed yet.
+- Added schema-3 window settings migration, preserving prior links and snapshots.
+- Kept text commands as UI fallback, guarded combat-time opening, and avoided
+  rebuilding hidden panels or replacing focused name-edit drafts.
+- Added mocked native frame, minimap, configuration, and migration tests.
+- `/rq` now toggles the dashboard; `/rq diag` remains the diagnostic command and
+  `/rq roster text` retains chat roster output.
+- New native UI behavior and persistence require in-client validation.
+
 ## 0.0.3 - Registration command fallback
 
 - Fixed add/link/ignore commands and login callbacks crashing when the

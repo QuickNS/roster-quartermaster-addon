@@ -138,7 +138,12 @@ local function root(value, label)
         return nil, label .. " is not a table; original data preserved."
     end
     value = RQ.Util.Copy(value or {})
-    if value.schemaVersion ~= nil and value.schemaVersion ~= 1 and value.schemaVersion ~= 2 then
+    if
+        value.schemaVersion ~= nil
+        and value.schemaVersion ~= 1
+        and value.schemaVersion ~= 2
+        and value.schemaVersion ~= 3
+    then
         return nil, label .. " has an unsupported schema; original data preserved."
     end
     return value
@@ -160,6 +165,19 @@ function Migrations.Prepare(accountValue, characterValue)
         if not value then
             return nil, nil, err
         end
+    end
+    local window
+    window, err = tableField(account.settings, "window", "RQDB.settings", RQ.Util.DefaultWindowPosition())
+    if not window then
+        return nil, nil, err
+    end
+    for key, value in pairs(RQ.Util.DefaultWindowPosition()) do
+        if window[key] == nil then
+            window[key] = value
+        end
+    end
+    if not RQ.Util.IsWindowPosition(window) then
+        return nil, nil, "RQDB.settings.window is invalid; original data preserved."
     end
     local slots
     slots, err = tableField(account, "plannedRoster", "RQDB", RQ.DefaultRoster)
@@ -196,6 +214,21 @@ function Migrations.Prepare(accountValue, characterValue)
     end
     if character.characterId ~= nil and not RQ.Util.IsText(character.characterId) then
         return nil, nil, "RQCharDB.characterId is invalid; original data preserved."
+    end
+    for id, entry in pairs(account.roster) do
+        if entry.enabled == nil then
+            entry.enabled = true
+        end
+        if account.characters[id] == nil then
+            local identity = {}
+            for _, field in ipairs({ "guid", "displayName", "realm", "class", "race" }) do
+                identity[field] = entry[field]
+            end
+            account.characters[id] = {
+                identity = identity,
+                registration = entry.enabled and "member" or "ignored",
+            }
+        end
     end
     for id, record in pairs(account.characters) do
         if not RQ.Util.IsText(id) or type(record) ~= "table" then

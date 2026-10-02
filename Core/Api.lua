@@ -389,3 +389,378 @@ function Api.GetCapabilities()
     end
     return copy
 end
+
+local dashboard
+local dashboardFailure
+local minimapButton
+local minimapFailure
+
+local function uiOperation(name, operation)
+    local ok, err = pcall(operation)
+    if not ok then
+        local message = tostring(err):sub(1, 200)
+        capabilities[name] = "error: " .. message
+        return false, message
+    end
+    capabilities[name] = "available"
+    return true
+end
+
+local function uiFrame(kind, parent, template, name)
+    local created = call("CreateFrame", kind, name, parent, template)
+    if not created or not created[2] then
+        error("CreateFrame unavailable for " .. kind)
+    end
+    return created[2]
+end
+
+local function uiText(parent, x, y, width, template)
+    local label = parent:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
+    label:SetPoint("TOPLEFT", x, y)
+    label:SetWidth(width)
+    label:SetJustifyH("LEFT")
+    label:SetJustifyV("TOP")
+    return label
+end
+
+local function uiButton(parent, text, x, y, width, click)
+    local button = uiFrame("Button", parent, "UIPanelButtonTemplate")
+    button:SetPoint("TOPLEFT", x, y)
+    button:SetSize(width, 24)
+    button:SetText(text)
+    button:SetScript("OnClick", click)
+    return button
+end
+
+local function enable(button, enabled)
+    if enabled then
+        button:Enable()
+    else
+        button:Disable()
+    end
+end
+
+function Api.IsRosterWindowShown()
+    return dashboard ~= nil and dashboard.frame:IsShown()
+end
+
+function Api.HideRosterWindow()
+    if dashboard then
+        dashboard.frame:Hide()
+    end
+end
+
+function Api.ResetRosterWindowPosition()
+    if dashboard then
+        local ok, err = uiOperation("rosterWindowPosition", function()
+            dashboard.frame:ClearAllPoints()
+            dashboard.frame:SetPoint("CENTER", _G.UIParent, "CENTER", 0, 0)
+        end)
+        if not ok then
+            Api.Print("Cannot reset window position: " .. err)
+        end
+        return ok
+    end
+    return true
+end
+
+local function createDashboard(position, handlers)
+    local frame = uiFrame("Frame", _G.UIParent, nil, "RQMainWindow")
+    frame:Hide()
+    dashboard = { frame = frame, cards = {}, handlers = handlers }
+    frame:SetSize(800, 600)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetPoint(position.point, _G.UIParent, position.relativePoint, position.x, position.y)
+    frame:SetScript("OnDragStart", function()
+        if Api.IsInCombat() == false then
+            frame:StartMoving()
+        end
+    end)
+    frame:SetScript("OnDragStop", function()
+        local saved
+        local ok, err = uiOperation("rosterWindowPosition", function()
+            frame:StopMovingOrSizing()
+            local point, _, relativePoint, x, y = frame:GetPoint(1)
+            saved = { point = point, relativePoint = relativePoint, x = x, y = y }
+            if not RQ.Util.IsWindowPosition(saved) then
+                error("Invalid native window position")
+            end
+        end)
+        if ok then
+            dashboard.handlers.position(saved)
+        else
+            Api.Print("Window position not saved: " .. err)
+        end
+    end)
+    frame:SetScript("OnHide", function()
+        frame:StopMovingOrSizing()
+    end)
+    local background = frame:CreateTexture(nil, "BACKGROUND")
+    background:SetAllPoints()
+    background:SetColorTexture(0.035, 0.035, 0.045, 0.97)
+    dashboard.title = uiText(frame, 18, -16, 610, "GameFontNormalLarge")
+    uiButton(frame, "Close", 712, -12, 72, Api.HideRosterWindow)
+    dashboard.rosterTab = uiButton(frame, "Roster", 18, -48, 120, function()
+        dashboard.handlers.tab("roster")
+    end)
+    dashboard.settingsTab = uiButton(frame, "Settings", 146, -48, 120, function()
+        dashboard.handlers.tab("settings")
+    end)
+    uiButton(frame, "Rescan current", 618, -48, 166, function()
+        dashboard.handlers.rescan()
+    end)
+    dashboard.status = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    dashboard.status:SetPoint("BOTTOMLEFT", 18, 12)
+    dashboard.status:SetWidth(650)
+    dashboard.status:SetJustifyH("LEFT")
+    uiButton(frame, "Center", 698, -564, 86, function()
+        dashboard.handlers.resetPosition()
+    end)
+    local scroll = uiFrame("ScrollFrame", frame, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 18, -88)
+    scroll:SetPoint("BOTTOMRIGHT", -38, 42)
+    local content = uiFrame("Frame", scroll)
+    content:SetSize(728, 1)
+    scroll:SetScrollChild(content)
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function(_, delta)
+        local maximum = math.max(0, content:GetHeight() - scroll:GetHeight())
+        scroll:SetVerticalScroll(math.max(0, math.min(maximum, scroll:GetVerticalScroll() - delta * 40)))
+    end)
+    dashboard.scroll, dashboard.content = scroll, content
+    local settings = uiFrame("Frame", frame)
+    settings:SetPoint("TOPLEFT", 18, -88)
+    settings:SetPoint("BOTTOMRIGHT", -18, 42)
+    dashboard.settings = settings
+    dashboard.characterLabel = uiText(settings, 0, 0, 720, "GameFontNormal")
+    dashboard.previousCharacter = uiButton(settings, "Previous", 0, -34, 100, function()
+        dashboard.handlers.character(-1)
+    end)
+    dashboard.nextCharacter = uiButton(settings, "Next", 108, -34, 100, function()
+        dashboard.handlers.character(1)
+    end)
+    dashboard.characterDetails = uiText(settings, 228, -32, 500)
+    dashboard.add = uiButton(settings, "Add / resume", 0, -100, 160, function()
+        dashboard.handlers.register("add")
+    end)
+    dashboard.ignore = uiButton(settings, "Ignore", 170, -100, 130, function()
+        dashboard.handlers.register("ignore")
+    end)
+    dashboard.main = uiButton(settings, "Make main", 310, -100, 160, function()
+        dashboard.handlers.main()
+    end)
+    dashboard.role = uiButton(settings, "Role", 0, -140, 300, function()
+        dashboard.handlers.role()
+    end)
+    dashboard.unlink = uiButton(settings, "Unlink slot", 310, -140, 160, function()
+        dashboard.handlers.unlink()
+    end)
+    dashboard.slotLabel = uiText(settings, 0, -208, 720, "GameFontNormal")
+    dashboard.previousSlot = uiButton(settings, "Previous", 0, -238, 100, function()
+        dashboard.handlers.slot(-1)
+    end)
+    dashboard.nextSlot = uiButton(settings, "Next", 108, -238, 100, function()
+        dashboard.handlers.slot(1)
+    end)
+    dashboard.slotDetails = uiText(settings, 228, -236, 500)
+    uiText(settings, 0, -288, 112):SetText("Planned name")
+    local edit = uiFrame("EditBox", settings, "InputBoxTemplate")
+    edit:SetSize(380, 28)
+    edit:SetPoint("TOPLEFT", 120, -278)
+    edit:SetAutoFocus(false)
+    edit:SetMaxLetters(64)
+    edit:SetScript("OnEscapePressed", function()
+        edit:ClearFocus()
+        Api.HideRosterWindow()
+    end)
+    local function rename()
+        local name = edit:GetText()
+        edit:ClearFocus()
+        dashboard.handlers.rename(name)
+    end
+    edit:SetScript("OnEnterPressed", rename)
+    dashboard.name = edit
+    dashboard.saveName = uiButton(settings, "Save name", 516, -280, 130, rename)
+    dashboard.link = uiButton(settings, "Link selected character", 0, -328, 240, function()
+        dashboard.handlers.register("link")
+    end)
+    uiText(settings, 0, -374, 720):SetText(
+        "Role button cycles through the supported roles. Main/role controls require an enabled member.\n"
+            .. "To change slots, unlink first. Ignore keeps the existing link; Add / resume enables tracking again.\n"
+            .. "Selecting an offline character changes configuration only; it never logs into that character."
+    )
+    if type(_G.UISpecialFrames) == "table" then
+        local found = false
+        for _, name in ipairs(_G.UISpecialFrames) do
+            found = found or name == "RQMainWindow"
+        end
+        if not found then
+            table.insert(_G.UISpecialFrames, "RQMainWindow")
+        end
+        capabilities.rosterWindowEscape = "available"
+    else
+        capabilities.rosterWindowEscape = "missing UISpecialFrames; use Close or /rq close"
+    end
+end
+
+function Api.RenderRosterWindow(view, handlers, position)
+    if Api.IsInCombat() ~= false then
+        return false, "Combat or combat-state API unavailable."
+    end
+    if dashboardFailure then
+        return false, dashboardFailure
+    end
+    local ok, err = uiOperation("rosterWindow", function()
+        if not dashboard then
+            createDashboard(position, handlers)
+        end
+        dashboard.handlers = handlers
+        dashboard.title:SetText("Roster Quartermaster " .. RQ.version)
+        dashboard.status:SetText(
+            view.status ~= "" and view.status
+                or "Last observed snapshots. Drag the window to move it; Esc or Close to dismiss."
+        )
+        enable(dashboard.rosterTab, view.tab ~= "roster")
+        enable(dashboard.settingsTab, view.tab ~= "settings")
+        if view.tab == "roster" then
+            dashboard.settings:Hide()
+            dashboard.scroll:Show()
+            local y = 0
+            for index, card in ipairs(view.cards) do
+                local row = dashboard.cards[index]
+                if not row then
+                    row = uiFrame("Frame", dashboard.content)
+                    row:SetWidth(724)
+                    local background = row:CreateTexture(nil, "BACKGROUND")
+                    background:SetAllPoints()
+                    background:SetColorTexture(0.12, 0.12, 0.14, 0.8)
+                    row.title = uiText(row, 12, -10, 696, "GameFontNormal")
+                    row.body = uiText(row, 12, -36, 696)
+                    row.button = uiButton(row, "Configure", 580, -10, 130, function()
+                        dashboard.handlers.configure(row.characterId, row.slotId)
+                    end)
+                    dashboard.cards[index] = row
+                end
+                row.characterId, row.slotId = card.id, card.slotId
+                row.title:SetText(card.title)
+                local titleHeight = row.title:GetStringHeight()
+                row.body:ClearAllPoints()
+                row.body:SetPoint("TOPLEFT", 12, -titleHeight - 20)
+                row.body:SetText(card.body)
+                local height = titleHeight + row.body:GetStringHeight() + 64
+                row:SetHeight(height)
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", 0, -y)
+                row.button:ClearAllPoints()
+                row.button:SetPoint("BOTTOMRIGHT", -12, 10)
+                row.button:SetText(card.action)
+                row:Show()
+                y = y + height + 10
+            end
+            for index = #view.cards + 1, #dashboard.cards do
+                dashboard.cards[index]:Hide()
+            end
+            dashboard.content:SetHeight(math.max(1, y))
+            dashboard.scroll:SetVerticalScroll(
+                math.min(dashboard.scroll:GetVerticalScroll(), math.max(0, y - dashboard.scroll:GetHeight()))
+            )
+        else
+            dashboard.scroll:Hide()
+            dashboard.settings:Show()
+            dashboard.characterLabel:SetText("Character: " .. view.characterLabel)
+            dashboard.characterDetails:SetText(view.characterDetails)
+            dashboard.slotLabel:SetText("Provisional slot: " .. view.slotLabel)
+            dashboard.slotDetails:SetText(view.slotDetails)
+            dashboard.role:SetText("Role: " .. view.roleLabel .. " (next)")
+            dashboard.main:SetText(view.isMain and "Current main" or "Make main")
+            enable(dashboard.previousCharacter, #view.characterIds > 1)
+            enable(dashboard.nextCharacter, #view.characterIds > 1)
+            enable(dashboard.previousSlot, #view.slotIds > 1)
+            enable(dashboard.nextSlot, #view.slotIds > 1)
+            enable(dashboard.add, view.selectedId ~= nil and not view.isMember)
+            enable(dashboard.ignore, view.selectedId ~= nil and not view.isIgnored)
+            enable(dashboard.main, view.isMember and not view.isMain)
+            enable(dashboard.role, view.isMember)
+            enable(dashboard.unlink, view.canUnlink)
+            enable(dashboard.link, view.canLink)
+            enable(dashboard.saveName, view.selectedSlot ~= nil)
+            if dashboard.editingSlot ~= view.selectedSlot or not dashboard.name:HasFocus() then
+                dashboard.name:SetText(view.slotName)
+                dashboard.editingSlot = view.selectedSlot
+            end
+        end
+        dashboard.frame:Show()
+    end)
+    if not ok then
+        dashboardFailure = err
+        Api.HideRosterWindow()
+    end
+    return ok, err
+end
+
+function Api.CreateMinimapButton(onClick)
+    if minimapButton then
+        return true
+    end
+    if minimapFailure then
+        return false
+    end
+    if not _G.Minimap then
+        capabilities.minimapButton = "missing Minimap; use /rq"
+        return false
+    end
+    local created
+    local ok, err = uiOperation("minimapButton", function()
+        created = uiFrame("Button", _G.Minimap)
+        created:Hide()
+        created:SetSize(28, 28)
+        created:SetPoint("BOTTOMLEFT", _G.Minimap, "BOTTOMLEFT", -8, -8)
+        created:SetNormalTexture("Interface\\Icons\\INV_Misc_Note_01")
+        created:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
+        local label = created:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        label:SetPoint("CENTER")
+        label:SetText("RQ")
+        created:RegisterForClicks("LeftButtonUp")
+        created:SetScript("OnClick", onClick)
+        created:SetScript("OnEnter", function()
+            if not _G.GameTooltip then
+                capabilities.minimapTooltip = "missing GameTooltip"
+                return
+            end
+            local shown, tooltipError = uiOperation("minimapTooltip", function()
+                _G.GameTooltip:SetOwner(created, "ANCHOR_LEFT")
+                _G.GameTooltip:SetText("Roster Quartermaster")
+                _G.GameTooltip:AddLine("Click to open or close the roster dashboard.", 1, 1, 1)
+                _G.GameTooltip:Show()
+            end)
+            if not shown then
+                Api.Print("Minimap tooltip unavailable: " .. tooltipError)
+            end
+        end)
+        created:SetScript("OnLeave", function()
+            if _G.GameTooltip then
+                local hidden, tooltipError = uiOperation("minimapTooltip", function()
+                    _G.GameTooltip:Hide()
+                end)
+                if not hidden then
+                    Api.Print("Cannot hide minimap tooltip: " .. tooltipError)
+                end
+            end
+        end)
+        created:Show()
+    end)
+    if not ok then
+        minimapFailure = err
+        if created then
+            created:Hide()
+        end
+        Api.Print("Minimap button unavailable: " .. err .. " Use /rq.")
+        return false
+    end
+    minimapButton = created
+    return true
+end
