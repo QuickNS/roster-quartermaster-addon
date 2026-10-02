@@ -2,10 +2,19 @@
 
 ## Evidence status
 
-No running Forever client was available during this implementation. **No client
-API, event, interface number, reload behavior, or full-restart persistence has
-been confirmed.** Mock results must not be recorded as in-client observations.
-The TOC intentionally omits `Interface` pending an actual client observation.
+On 2026-10-02, the user reported this in-client `GetBuildInfo()` output:
+
+```text
+1.60.1 70170 Oct 1 2026 16001
+```
+
+This identifies client version **1.60.1**, build **70170**, build date
+**Oct 1 2026**, and interface **16001**. The TOC now declares that observed
+interface number.
+
+No direct client access was available during implementation. **Addon loading,
+other API behavior, event delivery, reload behavior, and full-restart persistence
+remain unverified.** Mock results must not be recorded as in-client observations.
 
 The compatibility probe tests conventional WoW API names with capability checks;
 it does not assert that Forever exposes these APIs unchanged. Calls that throw
@@ -16,7 +25,7 @@ return values are rejected when `issecretvalue` is available.
 
 | API / global | Candidate shape or use | Status |
 | --- | --- | --- |
-| `GetBuildInfo()` | version, build, date, interface number | Unverified |
+| `GetBuildInfo()` | version, build, date, interface number | User-reported output confirmed on 2026-10-02; see above |
 | `WOW_PROJECT_ID` | Numeric project ID; not proof of Forever flavour | Unverified |
 | `UnitGUID("player")` | Character GUID string | Unverified |
 | `UnitName("player")` | Display name as first return value | Unverified |
@@ -66,7 +75,7 @@ account-wide character records or register roster members.
 
 | Check | Observed result |
 | --- | --- |
-| Forever version/build/interface | Not run |
+| Forever version/build/interface | User-reported 2026-10-02: 1.60.1 / 70170 / 16001; build date Oct 1 2026 |
 | Fresh installation and `/rq diag` | Not run |
 | API return types, including no-rested-XP behavior | Not run |
 | Event delivery | Not run |

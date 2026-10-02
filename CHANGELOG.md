@@ -8,5 +8,7 @@
   snapshots, preserving unsupported or malformed databases without writing.
 - Added dependency-free mocked tests, Luacheck and StyLua configuration, and
   installation/manual-validation documentation.
-- Live Forever API compatibility, interface metadata, reload behavior, and
-  full-restart persistence remain unverified.
+- Set interface metadata to `16001` from the user-reported Forever `1.60.1`,
+  build `70170` (Oct 1 2026).
+- Addon loading, other live Forever APIs, reload behavior, and full-restart
+  persistence remain unverified.

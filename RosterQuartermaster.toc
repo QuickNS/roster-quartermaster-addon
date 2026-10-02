@@ -1,10 +1,10 @@
+## Interface: 16001
 ## Title: Roster Quartermaster
 ## Notes: Account-wide roster coordinator for World of Warcraft: Forever (compatibility spike).
 ## Author: Roster Quartermaster contributors
 ## Version: 0.0.1
 ## SavedVariables: RQDB
 ## SavedVariablesPerCharacter: RQCharDB
-# Interface deliberately omitted until verified in the Forever client. See docs/BETA_API_NOTES.md.
 
 Core/Namespace.lua
 Core/Api.lua

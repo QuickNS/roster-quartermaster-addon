@@ -15,9 +15,10 @@ Version `0.0.1` implements the **Milestone 0 compatibility spike**, not the MVP:
 - Non-destructive rejection of malformed or unsupported-schema SavedVariables.
 - Mocked boot, reload, persistence, and API failure tests.
 
-**Forever compatibility is not yet verified in-game.** The interface number is
-deliberately not guessed. Native persistence across `/reload` and a full client
-restart still needs testing. See [beta API notes](docs/BETA_API_NOTES.md) and the
+**Addon compatibility is not yet verified in-game.** The TOC targets interface
+`16001`, reported from Forever `1.60.1`, build `70170` (Oct 1 2026).
+Addon loading and native persistence across `/reload` and a full client restart
+still need testing. See [beta API notes](docs/BETA_API_NOTES.md) and the
 [manual test plan](docs/MANUAL_TEST_PLAN.md).
 
 The roster dashboard, roster linking, migrations, recommendations, offline
@@ -34,12 +35,13 @@ into the probe.
    /run if GetBuildInfo then print(GetBuildInfo()) else print("GetBuildInfo unavailable") end
    ```
 
-   The candidate WoW API returns version, build, date, and interface number.
-   Confirm that return shape in this client; do not substitute a guessed number.
+   The observed API output contains version, build, date, and interface number.
+   The current recorded result is `1.60.1 70170 Oct 1 2026 16001`.
 
-2. Add `## Interface: <observed interface number>` to
-   [RosterQuartermaster.toc](RosterQuartermaster.toc), replacing the placeholder
-   with the actual numeric value. If the API is unavailable, use the client's
+2. [RosterQuartermaster.toc](RosterQuartermaster.toc) already declares
+   `## Interface: 16001`. If your client reports a different interface number,
+   record the new build and update the header before testing. Do not substitute
+   a guessed value. If the API is unavailable, use the client's
    documented build information before continuing; do not bypass compatibility
    restrictions. Record the observation in [BETA_API_NOTES.md](docs/BETA_API_NOTES.md).
 3. Create `Interface/AddOns/RosterQuartermaster/` in the Forever client directory.
