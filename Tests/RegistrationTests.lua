@@ -19,6 +19,50 @@ return function(h)
         h.emit("PLAYER_LOGIN")
     end
 
+    test("slash registration works when the registration UI module did not load", function()
+        h.fakeCharacter()
+        h.loadAddon("UI/RegistrationPrompt.lua")
+        assert(RQ.Database.Initialize())
+        assert(RQ.SnapshotService.Refresh())
+        equal(RQ.RegistrationPrompt, nil)
+        _G.SlashCmdList.ROSTERQUARTERMASTER("link warrior")
+        equal(RQDB.roster["Player-Test-1"].slotId, "warrior")
+        equal(RQDB.plannedRoster.warrior.claimedBy, "Player-Test-1")
+        equal(RQ.Database.Current().registration, "member")
+        h.contains(h.messages(), "Roster registration saved")
+        _G.SlashCmdList.ROSTERQUARTERMASTER("ignore")
+        equal(RQ.Database.Current().registration, "ignored")
+        _G.SlashCmdList.ROSTERQUARTERMASTER("add")
+        equal(RQ.Database.Current().registration, "member")
+        _G.SlashCmdList.ROSTERQUARTERMASTER("link missing")
+        h.contains(h.messages(), "Registration failed: Unknown provisional slot")
+        h.contains(RQ.Diagnostics.Report(), "Registration UI module: NOT LOADED")
+    end)
+
+    test("missing registration UI reports installation trouble without breaking login or rescan", function()
+        h.fakeCharacter()
+        h.loadAddon("UI/RegistrationPrompt.lua")
+        h.emit("PLAYER_LOGIN")
+        h.emit("PLAYER_ENTERING_WORLD")
+        h.emit("PLAYER_REGEN_ENABLED")
+        _G.SlashCmdList.ROSTERQUARTERMASTER("rescan")
+        equal(RQ.Database.Current().registration, "pending")
+        local function warnings()
+            local count = 0
+            for _, message in ipairs(h.messages()) do
+                if message:find("UI/RegistrationPrompt.lua did not load", 1, true) then
+                    count = count + 1
+                end
+            end
+            return count
+        end
+        equal(warnings(), 1)
+        _G.SlashCmdList.ROSTERQUARTERMASTER("register")
+        equal(warnings(), 2)
+        h.contains(h.messages(), "/rq add, /rq link <slot>, or /rq ignore")
+        h.contains(h.messages(), "Snapshot refreshed")
+    end)
+
     test("provisional names never cause automatic roster linking", function()
         h.fakeCharacter()
         _G.UnitName = function()

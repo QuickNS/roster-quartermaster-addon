@@ -132,6 +132,7 @@ function Diagnostics.Report()
         "Schemas: account=" .. display(database.accountSchema) .. "; character=" .. display(database.characterSchema),
         "Last saved observation (server timestamp): " .. display(database.lastSeen),
         "Optional integrations: none loaded",
+        "Registration UI module: " .. (RQ.RegistrationPrompt and "loaded" or "NOT LOADED; reinstall complete addon"),
     }
     local record = RQ.Database.Current()
     if record then

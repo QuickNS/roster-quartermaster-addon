@@ -21,6 +21,20 @@ local function refresh()
     return ok, err
 end
 
+local missingPromptReported = false
+
+local function showRegistration(force)
+    if RQ.RegistrationPrompt then
+        RQ.RegistrationPrompt.Show(force)
+        return
+    end
+    if force or not missingPromptReported then
+        RQ.Api.Print("UI/RegistrationPrompt.lua did not load. Reinstall the complete addon and TOC, then /reload.")
+        RQ.Api.Print("Registration still works: /rq add, /rq link <slot>, or /rq ignore.")
+        missingPromptReported = true
+    end
+end
+
 local function onEvent(event, argument)
     RQ.Api.MarkEventObserved(event)
     if event == "ADDON_LOADED" then
@@ -30,7 +44,7 @@ local function onEvent(event, argument)
     elseif event == "PLAYER_LOGIN" then
         if RQ.Database.Initialize() then
             refresh()
-            RQ.RegistrationPrompt.Show()
+            showRegistration()
         end
         RQ.Api.Print("Roster snapshots loaded. Use /rq roster or /rq diag; the dashboard is not implemented yet.")
     elseif event == "PLAYER_LOGOUT" then
@@ -38,12 +52,12 @@ local function onEvent(event, argument)
     elseif event == "PLAYER_ENTERING_WORLD" then
         if RQ.Database.initialized then
             refresh()
-            RQ.RegistrationPrompt.Show()
+            showRegistration()
         end
     elseif event == "PLAYER_REGEN_DISABLED" then
         RQ.Api.HideRegistrationPrompt()
     elseif event == "PLAYER_REGEN_ENABLED" then
-        RQ.RegistrationPrompt.Show()
+        showRegistration()
     elseif eventSections[event] then
         if event ~= "PLAYER_XP_UPDATE" or argument == "player" then
             RQ.SnapshotService.Queue(eventSections[event])
@@ -64,14 +78,14 @@ RQ.Api.RegisterSlashCommand(function(message)
         local ok, err = refresh()
         if ok then
             RQ.Api.Print("Snapshot refreshed; incomplete sections retain old values. Use /rq diag for freshness.")
-            RQ.RegistrationPrompt.Show()
+            showRegistration()
         elseif RQ.Database.Current() and RQ.Database.Current().registration == "ignored" then
             RQ.Api.Print("Snapshot not saved: " .. err)
         end
     elseif command == "register" then
-        RQ.RegistrationPrompt.Show(true)
+        showRegistration(true)
     elseif command == "add" or command == "ignore" or command == "link" then
-        RQ.RegistrationPrompt.Choose(command, argument:lower())
+        RQ.SnapshotService.Register(command, argument:lower())
     elseif command == "roster" then
         RQ.Diagnostics.Roster()
     elseif command == "slots" then

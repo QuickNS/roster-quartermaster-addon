@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.3 - Registration command fallback
+
+- Fixed add/link/ignore commands and login callbacks crashing when the
+  registration UI module is absent, leaving slash commands in the chat input.
+- Moved registration orchestration into the snapshot service so slash commands
+  and UI buttons share the same behavior without requiring the UI to load.
+- Added a visible incomplete-installation warning and UI module status in diagnostics.
+- Added regression tests reproducing the reported `RegistrationPrompt` nil error.
+- SavedVariables remain at schema 2; no reset or migration is required.
+
 ## 0.0.2 - Database and snapshots
 
 - Added transactional, idempotent schema-1 to schema-2 migration with validation

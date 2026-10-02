@@ -1,26 +1,5 @@
-local Prompt = { announced = false }
+local Prompt = { announced = false, Choose = RQ.SnapshotService.Register }
 RQ.RegistrationPrompt = Prompt
-
-function Prompt.Choose(action, slotId)
-    local ok, err = RQ.Database.Register(action, slotId)
-    if not ok then
-        RQ.Api.Print("Registration failed: " .. err)
-        return false
-    end
-    RQ.SnapshotService.CancelPending()
-    if action ~= "ignore" then
-        local captured, captureError = RQ.SnapshotService.Capture()
-        if not captured then
-            RQ.Api.Print("Snapshot not saved: " .. captureError)
-        end
-    end
-    RQ.Api.HideRegistrationPrompt()
-    RQ.Api.Print(
-        action == "ignore" and "Character ignored. Use /rq register to reconsider."
-            or "Roster registration saved. Use /rq roster."
-    )
-    return true
-end
 
 function Prompt.Show(force)
     if force then

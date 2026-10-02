@@ -2,7 +2,7 @@
 ## Title: Roster Quartermaster
 ## Notes: Account-wide roster snapshots for World of Warcraft: Forever.
 ## Author: Roster Quartermaster contributors
-## Version: 0.0.2
+## Version: 0.0.3
 ## SavedVariables: RQDB
 ## SavedVariablesPerCharacter: RQCharDB
 

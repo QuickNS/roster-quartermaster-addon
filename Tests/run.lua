@@ -53,7 +53,7 @@ local function test(name, run)
     tests[#tests + 1] = { name = name, run = run }
 end
 
-local function loadAddon()
+local function loadAddon(skippedPath)
     local toc = assert(io.open("RosterQuartermaster.toc", "r"))
     local files = {}
     for line in toc:lines() do
@@ -64,7 +64,9 @@ local function loadAddon()
     toc:close()
     assert(#files > 0, "TOC has no runtime files")
     for _, path in ipairs(files) do
-        assert(loadfile(path))()
+        if path ~= skippedPath then
+            assert(loadfile(path))()
+        end
     end
 end
 

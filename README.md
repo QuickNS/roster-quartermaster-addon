@@ -5,7 +5,7 @@ The design is in [implementation-plan.md](implementation-plan.md).
 
 ## Current status
 
-Version `0.0.2` implements **Milestone 1: database and snapshots**, not the MVP:
+Version `0.0.3` implements **Milestone 1: database and snapshots**, not the MVP:
 
 - Lua 5.1-compatible addon entry point and explicit TOC load order.
 - Capability-checked API adapter with visible missing, restricted, and failed API diagnostics.
@@ -61,6 +61,20 @@ discovery and profession planning are not.
 
 This addon provides information only. It does not craft, mail, purchase, select
 characters, or automate combat.
+
+### Troubleshooting a stuck registration command
+
+If `/rq link warrior` stays in the chat input and reports
+`RegistrationPrompt (a nil value)`, the registration UI module did not load.
+Check that the installed addon includes `UI/RegistrationPrompt.lua` and that the
+installed TOC contains that path before `Bootstrap.lua`. Copy the complete
+updated addon, not just individual changed files, then run `/reload`.
+If the file and TOC entry are both present, enable `/console scriptErrors 1` and
+check for an earlier load error.
+
+Version 0.0.3 makes add/link/ignore independent of that UI module and reports
+its absence in chat and `/rq diag`. It does not reset your saved data. Reinstalling
+the missing module is still necessary to restore the registration window.
 
 ### Upgrading and registering
 
@@ -176,7 +190,7 @@ RosterQuartermaster/
 From the staging directory, run:
 
 ```sh
-zip -r RosterQuartermaster-0.0.2.zip RosterQuartermaster
+zip -r RosterQuartermaster-0.0.3.zip RosterQuartermaster
 ```
 
 Do not ship tests, toolchains, repository metadata, or development configuration.

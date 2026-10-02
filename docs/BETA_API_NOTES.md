@@ -19,6 +19,13 @@ user-reported passes on the build above, not as independently observed results.
 The new version 0.0.2 APIs, migration, registration UI, and event updates have
 only been tested with mocks so far.
 
+During 0.0.2 testing on 2026-10-02, the user reported `/rq link warrior`
+remaining in the chat input, with `Bootstrap.lua:74: attempt to index field
+'RegistrationPrompt' (a nil value)`. The user then confirmed that the `UI`
+directory had been omitted from the installation. Omitting the module in the test loader
+reproduced the same exception. Version 0.0.3 removes the slash-command dependency
+on that module and reports its absence. In-client confirmation is pending.
+
 No diagnostic transcript or separate per-test results were supplied. Individual
 API return values, event delivery details, and extended failure cases remain
 unconfirmed. No direct client access was available during implementation.
