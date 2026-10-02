@@ -14,8 +14,10 @@ interface number.
 
 Later on 2026-10-02, the user reported: **"everything passed. diag looks fine"**
 after receiving the installation, diagnostics/rescan, `/reload`, and full-restart
-persistence walkthrough. Those smoke tests are recorded as user-reported passes
-on the build above, not as independently observed results.
+persistence walkthrough for version 0.0.1. Those smoke tests are recorded as
+user-reported passes on the build above, not as independently observed results.
+The new version 0.0.2 APIs, migration, registration UI, and event updates have
+only been tested with mocks so far.
 
 No diagnostic transcript or separate per-test results were supplied. Individual
 API return values, event delivery details, and extended failure cases remain
@@ -51,37 +53,82 @@ individually confirmed; it does not mean the smoke test failed.
 | `CreateFrame("Frame")` | Event frame supporting `SetScript` and `RegisterEvent` | Unverified |
 | `SlashCmdList` / `SLASH_ROSTERQUARTERMASTER1` | Native `/rq` registration | Unverified |
 | `DEFAULT_CHAT_FRAME:AddMessage(text)` / `print(text)` | Diagnostics and fallback output | Unverified |
+| `GetMoney()` | Non-negative copper amount | New in 0.0.2; unverified |
+| `GetZoneText()` / `GetSubZoneText()` | Location labels, including an empty subzone | New in 0.0.2; unverified |
+| `NUM_TOTAL_EQUIPPED_BAG_SLOTS` / `NUM_BAG_SLOTS` | Equipped bag count, excluding backpack index 0 | New in 0.0.2; unverified |
+| `C_Container.GetContainerNumSlots` / `GetContainerNumSlots` | Slot count per equipped bag | New in 0.0.2; unverified |
+| `C_Container.GetContainerNumFreeSlots` / `GetContainerNumFreeSlots` | Free-slot count as first return | New in 0.0.2; unverified |
+| `GetProfessions()` | Up to six profession indices, possibly with nil holes | New in 0.0.2; unverified |
+| `GetProfessionInfo(index)` | Name, icon, rank, max rank, ability count, offset, skill-line ID | New in 0.0.2; unverified |
+| `C_Timer.After(seconds, callback)` | One-shot event coalescing | New in 0.0.2; unverified |
+| `InCombatLockdown()` | Boolean combat-lockdown state | New in 0.0.2; unverified |
+| Native frames, textures, `GameFontNormal`, `UIPanelButtonTemplate` | Registration choices; guarded construction | New in 0.0.2; unverified |
 
 There is deliberately no guessed clock fallback or invented client-flavour
-identifier. Missing GUIDs remain unknown in this spike; fallback identifiers and
-explicit provisional-roster linking belong to the registration milestone.
+identifier. Missing GUIDs use a normalized actual name/realm fallback when both
+are available. Missing all identifying information prevents capture instead of
+guessing a provisional roster slot.
+
+Profession capture uses stable numeric skill-line IDs from `GetProfessionInfo`.
+There is no localized-name-based `GetSkillLineInfo` fallback: the legacy API's
+ability to identify profession rows reliably is unresolved. Missing/restricted
+profession APIs leave the section incomplete and retain older observations.
+The skill-line IDs in the default planned roster are conventional planning
+defaults, not validated Forever recipe or profession data.
+
+Bag capture counts equipped capacity only; it does not scan item slots, bank,
+mail, or recipes. Missing bag-count constants result in unknown capacity rather
+than an assumed four-bag layout. Modern container methods are preferred when
+present, with legacy methods used only when their modern counterpart is absent.
+
+No combat-state API means no registration popup; chat commands still work.
+Failed native widget creation is reported and falls back to chat instructions.
 
 ## Events
 
-The probe registers `ADDON_LOADED`, `PLAYER_LOGIN`, and `PLAYER_LOGOUT`.
+In addition to `ADDON_LOADED`, `PLAYER_LOGIN`, and `PLAYER_LOGOUT`, version 0.0.2
+registers the following unverified candidate events:
+
+- `PLAYER_ENTERING_WORLD`: identity reconciliation and full refresh.
+- `PLAYER_LEVEL_UP`, `PLAYER_XP_UPDATE`: progression/rested refresh; XP events for
+  non-player units are ignored.
+- `UPDATE_EXHAUSTION`: rested refresh.
+- `PLAYER_UPDATE_RESTING`: location/resting and rested refresh.
+- `PLAYER_MONEY`: money refresh.
+- `BAG_UPDATE_DELAYED`: capacity refresh only.
+- `SKILL_LINES_CHANGED`, `TRADE_SKILL_LIST_UPDATE`: profession skill refresh.
+- `ZONE_CHANGED_NEW_AREA`, `ZONE_CHANGED`, `ZONE_CHANGED_INDOORS`: location refresh.
+- `PLAYER_REGEN_DISABLED` / `PLAYER_REGEN_ENABLED`: hide/defer registration UI.
+
 Diagnostics distinguish **registered (not yet observed)** from **observed**.
 Successful registration alone does not prove that an event fires. Registration
 failures are reported individually and do not prevent other subscriptions.
 
-All other events listed in the implementation plan are deferred until their
-snapshot sections exist. No bag scans or per-frame polling are performed.
+Events coalesce into one section-specific update after 0.25 seconds. If the timer
+API is absent/restricted, the addon warns once and refreshes immediately instead.
+Level-up capture is deferred with the timer so progression APIs can catch up.
+Without a working timer, use `/rq rescan` if the level-up event precedes the API
+state change. Logout captures synchronously and invalidates queued callbacks.
+No per-frame polling is performed. Quest, bank, and mail events are deferred.
 
 ## Persistence
 
-`RQDB` is account-wide and `RQCharDB` is per-character. This spike records current
-identity and a small compatibility snapshot; it does not yet maintain offline
-account-wide character records or register roster members.
+`RQDB` is account-wide and `RQCharDB` is per-character. Version 0.0.2 keeps
+independent account-wide character snapshots, explicit registration status,
+provisional slot links, and per-character current-state copies.
 
-- Nil and structurally valid partial databases are initialized at schema 1.
+- Nil and structurally valid partial databases initialize at schema 2.
+- Schema 1 migrates to schema 2 on copied data; both roots are validated before
+  either is replaced. The migration is idempotent.
 - Unknown fields are preserved during initialization.
 - Invalid table shapes or any explicit unsupported schema disable writes to
   **both** databases. The originals are retained, with an explicit diagnostic.
-- No migration from an earlier released schema exists because there is no
-  earlier release. Future schema changes must introduce idempotent migrations.
+- Downgrading to 0.0.1 requires restoring the pre-upgrade backup; schema 2 is not
+  understood by the old version. Future changes require idempotent migrations.
 - A successful initializer means only that the in-memory tables are ready. It
   does not prove the client wrote them to disk.
 
-### Client observations to record
+### Version 0.0.1 client observations
 
 | Check | Observed result |
 | --- | --- |
@@ -95,6 +142,17 @@ account-wide character records or register roster members.
 | Logout timestamp written and retained | Not individually confirmed |
 | Missing/restricted API behavior in the client | Not individually confirmed |
 | Second-character isolation, level-cap cases, corrupt data, and combat | Extended manual tests not explicitly reported |
+
+### Version 0.0.2 client observations
+
+| Check | Observed result |
+| --- | --- |
+| Schema-1 upgrade preserving existing data | Not run in client |
+| Add/link/ignore and editable provisional names | Not run in client |
+| Five account-wide records and GUID rename reconciliation | Not run in client |
+| Targeted XP/resting/location/money/bag/profession events | Not run in client |
+| Registration popup, combat deferral, and slash fallback | Not run in client |
+| Reload/restart with account-wide snapshots and links | Not run in client |
 
 If persistence fails, record the exact build and whether the failure occurs on
 reload, clean exit, or both. Do not describe data as durable until tested.

@@ -1,6 +1,7 @@
 local tests = {}
 local messages
 local frame
+local timers
 local apiNames = {
     "GetBuildInfo",
     "UnitGUID",
@@ -20,6 +21,19 @@ local apiNames = {
     "DEFAULT_CHAT_FRAME",
     "SlashCmdList",
     "SLASH_ROSTERQUARTERMASTER1",
+    "GetMoney",
+    "GetZoneText",
+    "GetSubZoneText",
+    "NUM_BAG_SLOTS",
+    "NUM_TOTAL_EQUIPPED_BAG_SLOTS",
+    "GetContainerNumSlots",
+    "GetContainerNumFreeSlots",
+    "C_Container",
+    "GetProfessions",
+    "GetProfessionInfo",
+    "C_Timer",
+    "InCombatLockdown",
+    "UIParent",
 }
 
 local function equal(actual, expected)
@@ -62,6 +76,7 @@ local function reset()
     RQDB = nil
     RQCharDB = nil
     messages = {}
+    timers = {}
     frame = { events = {} }
     function frame:SetScript(script, handler)
         equal(script, "OnEvent")
@@ -83,6 +98,36 @@ local function reset()
 end
 
 local function fakeCharacter()
+    _G.C_Timer = {
+        After = function(_, callback)
+            timers[#timers + 1] = callback
+        end,
+    }
+    _G.GetMoney = function()
+        return 12345
+    end
+    _G.GetZoneText = function()
+        return "Test Zone"
+    end
+    _G.GetSubZoneText = function()
+        return "Test Inn"
+    end
+    _G.NUM_BAG_SLOTS = 4
+    _G.GetContainerNumSlots = function(bag)
+        return bag < 2 and 16 or 0
+    end
+    _G.GetContainerNumFreeSlots = function()
+        return 5
+    end
+    _G.GetProfessions = function()
+        return 7, nil, nil, nil, 9
+    end
+    _G.GetProfessionInfo = function(index)
+        if index == 7 then
+            return "Mining", 0, 100, 150, 0, 0, 186
+        end
+        return "Cooking", 0, 20, 75, 0, 0, 185
+    end
     _G.GetBuildInfo = function()
         return "test-client", "12345", "test-date", 99999
     end
@@ -135,8 +180,8 @@ test("TOC load order, scoped initialization, login and logout", function()
     emit("ADDON_LOADED", "UnrelatedAddon")
     equal(RQDB, nil)
     emit("ADDON_LOADED", "RosterQuartermaster")
-    equal(RQDB.schemaVersion, 1)
-    equal(RQCharDB.schemaVersion, 1)
+    equal(RQDB.schemaVersion, 2)
+    equal(RQCharDB.schemaVersion, 2)
     emit("PLAYER_LOGIN")
     equal(RQCharDB.identity.guid, "Player-Test-1")
     equal(RQCharDB.identity.class, "WARRIOR")
@@ -159,7 +204,7 @@ test("diagnostics include observed build, snapshot and capability output", funct
     contains(messages, "GUID: Player-Test-1")
     contains(messages, "Level: 25; XP: 12000/40000")
     contains(messages, "Rested XP (observed): 20000; resting: false")
-    contains(messages, "Schemas: account=1; character=1")
+    contains(messages, "Schemas: account=2; character=2")
     contains(messages, "Last saved observation (server timestamp): 123456789")
 end)
 
@@ -297,7 +342,7 @@ test("rescan updates the probe and does not claim unavailable storage worked", f
     end
     _G.SlashCmdList.ROSTERQUARTERMASTER("rescan")
     equal(RQCharDB.snapshot.xp, 13000)
-    contains(messages, "Compatibility snapshot refreshed")
+    contains(messages, "Snapshot refreshed")
     _G.SlashCmdList.ROSTERQUARTERMASTER("unknown")
     contains(messages, "Available commands:")
 end)
@@ -364,6 +409,31 @@ test("a malformed account does not initialize or modify the character database",
     equal(RQCharDB.schemaVersion, nil)
     contains(messages, "RQDB.settings is not a table")
 end)
+
+local helpers = {
+    test = test,
+    equal = equal,
+    contains = contains,
+    loadAddon = loadAddon,
+    fakeCharacter = fakeCharacter,
+    emit = emit,
+    messages = function()
+        return messages
+    end,
+    flushTimers = function()
+        local pending = timers
+        timers = {}
+        for _, callback in ipairs(pending) do
+            callback()
+        end
+    end,
+    timerCount = function()
+        return #timers
+    end,
+}
+assert(loadfile("Tests/MigrationTests.lua"))()(helpers)
+assert(loadfile("Tests/SnapshotServiceTests.lua"))()(helpers)
+assert(loadfile("Tests/RegistrationTests.lua"))()(helpers)
 
 local failed = 0
 for _, item in ipairs(tests) do

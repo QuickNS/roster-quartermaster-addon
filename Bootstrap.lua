@@ -1,45 +1,106 @@
-local function capture(logout)
-    if not RQ.Database.initialized then
-        return false
+local eventSections = {
+    PLAYER_LEVEL_UP = { "progression", "rested" },
+    PLAYER_XP_UPDATE = { "progression", "rested" },
+    UPDATE_EXHAUSTION = { "rested" },
+    PLAYER_UPDATE_RESTING = { "location", "rested" },
+    PLAYER_MONEY = { "money" },
+    BAG_UPDATE_DELAYED = { "bags" },
+    SKILL_LINES_CHANGED = { "professions" },
+    TRADE_SKILL_LIST_UPDATE = { "professions" },
+    ZONE_CHANGED_NEW_AREA = { "location" },
+    ZONE_CHANGED = { "location" },
+    ZONE_CHANGED_INDOORS = { "location" },
+}
+
+local function refresh()
+    local ok, err = RQ.SnapshotService.Refresh()
+    local record = RQ.Database.Current()
+    if not ok and (not record or record.registration ~= "ignored") then
+        RQ.Api.Print("Snapshot not saved: " .. err)
     end
-    local identity, snapshot = RQ.Diagnostics.Capture()
-    if logout then
-        snapshot.lastLogout = snapshot.lastSeen
-    elseif type(RQCharDB.snapshot) == "table" then
-        snapshot.lastLogout = RQCharDB.snapshot.lastLogout
-    end
-    return RQ.Database.SaveProbe(identity, snapshot)
+    return ok, err
 end
 
-local function onEvent(event, addonName)
+local function onEvent(event, argument)
     RQ.Api.MarkEventObserved(event)
     if event == "ADDON_LOADED" then
-        if addonName == RQ.name then
+        if argument == RQ.name then
             RQ.Database.Initialize()
         end
     elseif event == "PLAYER_LOGIN" then
         if RQ.Database.Initialize() then
-            capture(false)
+            refresh()
+            RQ.RegistrationPrompt.Show()
         end
-        RQ.Api.Print("Compatibility probe loaded. Use /rq diag; the roster dashboard is not implemented yet.")
+        RQ.Api.Print("Roster snapshots loaded. Use /rq roster or /rq diag; the dashboard is not implemented yet.")
     elseif event == "PLAYER_LOGOUT" then
-        capture(true)
+        RQ.SnapshotService.Logout()
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        if RQ.Database.initialized then
+            refresh()
+            RQ.RegistrationPrompt.Show()
+        end
+    elseif event == "PLAYER_REGEN_DISABLED" then
+        RQ.Api.HideRegistrationPrompt()
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        RQ.RegistrationPrompt.Show()
+    elseif eventSections[event] then
+        if event ~= "PLAYER_XP_UPDATE" or argument == "player" then
+            RQ.SnapshotService.Queue(eventSections[event])
+        end
     end
 end
 
 RQ.Api.RegisterSlashCommand(function(message)
-    local command = (message or ""):match("^%s*(.-)%s*$"):lower()
+    local command, argument = (message or ""):match("^%s*(%S*)%s*(.-)%s*$")
+    command = command:lower()
     if command == "" or command == "diag" then
         RQ.Diagnostics.Report()
     elseif command == "rescan" then
-        if capture(false) then
-            RQ.Api.Print("Compatibility snapshot refreshed. Use /rq diag to inspect API availability.")
-        else
+        if not RQ.Database.initialized then
             RQ.Api.Print("Snapshot not saved: " .. RQ.Database.status)
+            return
         end
+        local ok, err = refresh()
+        if ok then
+            RQ.Api.Print("Snapshot refreshed; incomplete sections retain old values. Use /rq diag for freshness.")
+            RQ.RegistrationPrompt.Show()
+        elseif RQ.Database.Current() and RQ.Database.Current().registration == "ignored" then
+            RQ.Api.Print("Snapshot not saved: " .. err)
+        end
+    elseif command == "register" then
+        RQ.RegistrationPrompt.Show(true)
+    elseif command == "add" or command == "ignore" or command == "link" then
+        RQ.RegistrationPrompt.Choose(command, argument:lower())
+    elseif command == "roster" then
+        RQ.Diagnostics.Roster()
+    elseif command == "slots" then
+        RQ.Diagnostics.Slots()
+    elseif command == "name" then
+        local slot, name = argument:match("^(%S+)%s+(.+)$")
+        if not slot then
+            RQ.Api.Print("Usage: /rq name <slot> <planned name>")
+            return
+        end
+        local ok, err = RQ.Database.RenameSlot(slot:lower(), name)
+        RQ.Api.Print(ok and "Planned name updated." or "Name not changed: " .. err)
     else
-        RQ.Api.Print("Available commands: /rq, /rq diag, /rq rescan. Other commands arrive in later milestones.")
+        RQ.Api.Print(
+            "Available commands: /rq diag, rescan, roster, slots, register, add, link <slot>, ignore, "
+                .. "name <slot> <name>."
+        )
     end
 end)
 
-RQ.eventFrame = RQ.Api.Subscribe({ "ADDON_LOADED", "PLAYER_LOGIN", "PLAYER_LOGOUT" }, onEvent)
+local events = {
+    "ADDON_LOADED",
+    "PLAYER_LOGIN",
+    "PLAYER_LOGOUT",
+    "PLAYER_ENTERING_WORLD",
+    "PLAYER_REGEN_DISABLED",
+    "PLAYER_REGEN_ENABLED",
+}
+for _, event in ipairs(RQ.Util.Keys(eventSections)) do
+    events[#events + 1] = event
+end
+RQ.eventFrame = RQ.Api.Subscribe(events, onEvent)

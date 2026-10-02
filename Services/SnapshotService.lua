@@ -1,0 +1,107 @@
+local Service = { pending = {}, generation = 0 }
+RQ.SnapshotService = Service
+
+local function collect(section)
+    local api = RQ.Api
+    if section == "progression" then
+        return api.GetCharacterProgression()
+    elseif section == "rested" then
+        return { restedXp = api.GetRestedXP() }
+    elseif section == "location" then
+        local location = api.GetLocation()
+        location.wasResting = api.IsResting()
+        return location
+    elseif section == "money" then
+        return { money = api.GetMoney() }
+    elseif section == "bags" then
+        return api.GetBagCapacity() or {}
+    elseif section == "professions" then
+        return { professions = api.GetProfessions() }
+    end
+    error("Unknown snapshot section: " .. tostring(section))
+end
+
+function Service.Capture(sections, logout)
+    local record = RQ.Database.Current()
+    if not record then
+        return false, "Current character identity unavailable."
+    end
+    if record.registration == "ignored" then
+        return false, "Character is ignored; use /rq register to enable tracking."
+    end
+    local snapshot = RQ.Util.Copy(record.snapshot)
+    local now = RQ.Api.GetServerTime()
+    for section in pairs(sections or RQ.Snapshot.fields) do
+        RQ.Snapshot.Apply(snapshot, section, collect(section), now)
+    end
+    snapshot.lastSeen = now or snapshot.lastSeen
+    if logout then
+        snapshot.lastLogout = now
+    end
+    return RQ.Database.SaveSnapshot(snapshot)
+end
+
+function Service.Refresh()
+    Service.CancelPending()
+    local record, err = RQ.Database.Attach(RQ.Api.GetCharacterIdentity())
+    if not record then
+        return false, err
+    end
+    return Service.Capture()
+end
+
+function Service.CancelPending()
+    Service.pending = {}
+    Service.scheduled = false
+    Service.generation = Service.generation + 1
+end
+
+function Service.Flush()
+    local pending = Service.pending
+    Service.CancelPending()
+    if next(pending) then
+        local ok, err = Service.Capture(pending)
+        if not ok then
+            RQ.Api.Print("Snapshot not saved: " .. err)
+        end
+    end
+end
+
+function Service.Queue(sections)
+    local record = RQ.Database.Current()
+    if not record or record.registration == "ignored" then
+        return
+    end
+    for _, section in ipairs(sections) do
+        Service.pending[section] = true
+    end
+    if Service.scheduled then
+        return
+    end
+    Service.scheduled = true
+    local generation = Service.generation
+    if
+        not RQ.Api.After(0.25, function()
+            if Service.generation == generation then
+                Service.Flush()
+            end
+        end)
+    then
+        if not Service.timerWarning then
+            RQ.Api.Print("Timer API unavailable: event updates run immediately without debouncing; see /rq diag.")
+            Service.timerWarning = true
+        end
+        Service.Flush()
+    end
+end
+
+function Service.Logout()
+    Service.CancelPending()
+    local record = RQ.Database.Current()
+    if record and record.registration ~= "ignored" then
+        local ok, err = Service.Capture(nil, true)
+        if not ok then
+            RQ.Api.Print("Logout snapshot not saved: " .. err)
+        end
+    end
+end

@@ -3,8 +3,19 @@ RQ.Api = Api
 
 local capabilities = {}
 
+local function lookup(name)
+    local value = _G
+    for part in name:gmatch("[^.]+") do
+        if type(value) ~= "table" then
+            return nil
+        end
+        value = value[part]
+    end
+    return value
+end
+
 local function call(name, ...)
-    local fn = _G[name]
+    local fn = lookup(name)
     if type(fn) ~= "function" then
         capabilities[name] = "missing"
         return nil
@@ -82,19 +93,27 @@ function Api.GetClientProject()
 end
 
 function Api.GetCharacterIdentity()
+    local function identityText(name, ...)
+        local value = scalar(name, "string", ...)
+        if value ~= nil and not RQ.Util.IsText(value) then
+            capabilities[name] = "empty identity value"
+            return nil
+        end
+        return value
+    end
     local identity = {
-        guid = scalar("UnitGUID", "string", "player"),
-        displayName = scalar("UnitName", "string", "player"),
-        realm = scalar("GetRealmName", "string"),
+        guid = identityText("UnitGUID", "player"),
+        displayName = identityText("UnitName", "player"),
+        realm = identityText("GetRealmName"),
     }
     local class = call("UnitClass", "player")
-    if class and type(class[3]) == "string" then
+    if class and RQ.Util.IsText(class[3]) then
         identity.class = class[3]
     elseif class then
         capabilities.UnitClass = "unexpected return type"
     end
     local race = call("UnitRace", "player")
-    if race and type(race[2]) == "string" then
+    if race and RQ.Util.IsText(race[2]) then
         identity.race = race[2]
     elseif race then
         capabilities.UnitRace = "unexpected return type"
@@ -133,6 +152,173 @@ end
 
 function Api.GetServerTime()
     return scalar("GetServerTime", "number")
+end
+
+function Api.GetMoney()
+    return scalar("GetMoney", "number")
+end
+
+function Api.GetLocation()
+    return {
+        zone = scalar("GetZoneText", "string"),
+        subZone = scalar("GetSubZoneText", "string"),
+    }
+end
+
+function Api.GetBagCapacity()
+    local constant = _G.NUM_TOTAL_EQUIPPED_BAG_SLOTS ~= nil and "NUM_TOTAL_EQUIPPED_BAG_SLOTS" or "NUM_BAG_SLOTS"
+    local count = _G[constant]
+    if type(_G.issecretvalue) == "function" then
+        local ok, secret = pcall(_G.issecretvalue, count)
+        if not ok or secret then
+            capabilities[constant] = "restricted value"
+            return nil
+        end
+    end
+    if not RQ.Util.IsNumber(count) or count > 20 or count % 1 ~= 0 then
+        capabilities[constant] = "missing or invalid bag count"
+        return nil
+    end
+    capabilities[constant] = "available"
+    local slotsApi = type(lookup("C_Container.GetContainerNumSlots")) == "function"
+            and "C_Container.GetContainerNumSlots"
+        or "GetContainerNumSlots"
+    local freeApi = type(lookup("C_Container.GetContainerNumFreeSlots")) == "function"
+            and "C_Container.GetContainerNumFreeSlots"
+        or "GetContainerNumFreeSlots"
+    local capacity = { bagSlots = 0, freeBagSlots = 0 }
+    for bag = 0, count do
+        local slots = scalar(slotsApi, "number", bag)
+        if slots == nil then
+            return nil
+        end
+        local free = slots == 0 and 0 or scalar(freeApi, "number", bag)
+        if free == nil then
+            return nil
+        end
+        if free > slots or free % 1 ~= 0 or slots % 1 ~= 0 then
+            capabilities[freeApi] = "invalid bag capacity"
+            return nil
+        end
+        capacity.bagSlots = capacity.bagSlots + slots
+        capacity.freeBagSlots = capacity.freeBagSlots + free
+    end
+    return capacity
+end
+
+function Api.GetProfessions()
+    local indices = call("GetProfessions")
+    if not indices then
+        return nil
+    end
+    local professions = {}
+    -- GetProfessions may contain nil holes between its six profession slots.
+    for slot = 2, 7 do
+        local index = indices[slot]
+        if index ~= nil then
+            if not RQ.Util.IsNumber(index) or index % 1 ~= 0 then
+                capabilities.GetProfessions = "invalid profession index"
+                return nil
+            end
+            local info = call("GetProfessionInfo", index)
+            if not info then
+                return nil
+            end
+            local id, name, skill, maxSkill = info[8], info[2], info[4], info[5]
+            if
+                not RQ.Util.IsNumber(id)
+                or id == 0
+                or id % 1 ~= 0
+                or not RQ.Util.IsText(name)
+                or not RQ.Util.IsNumber(skill)
+                or not RQ.Util.IsNumber(maxSkill)
+                or skill > maxSkill
+            then
+                capabilities.GetProfessionInfo = "invalid profession data or missing skill-line ID"
+                return nil
+            end
+            professions[id] = { name = name, skill = skill, maxSkill = maxSkill }
+        end
+    end
+    return professions
+end
+
+function Api.After(seconds, callback)
+    return call("C_Timer.After", seconds, callback) ~= nil
+end
+
+function Api.IsInCombat()
+    return scalar("InCombatLockdown", "boolean")
+end
+
+local registrationFrame
+
+function Api.HideRegistrationPrompt()
+    if registrationFrame then
+        registrationFrame:Hide()
+    end
+end
+
+function Api.ShowRegistrationPrompt(title, choices)
+    if Api.IsInCombat() ~= false then
+        return false
+    end
+    local ok, err = pcall(function()
+        if not registrationFrame then
+            local created = call("CreateFrame", "Frame", nil, _G.UIParent)
+            if not created or not created[2] then
+                error("CreateFrame unavailable")
+            end
+            local frame = created[2]
+            frame:Hide()
+            frame:SetPoint("CENTER")
+            frame:SetFrameStrata("DIALOG")
+            frame:EnableMouse(true)
+            local background = frame:CreateTexture(nil, "BACKGROUND")
+            background:SetAllPoints()
+            background:SetColorTexture(0.05, 0.05, 0.05, 0.95)
+            frame.title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            frame.title:SetPoint("TOPLEFT", 16, -16)
+            frame.title:SetWidth(328)
+            frame.buttons = {}
+            registrationFrame = frame
+        end
+        local frame = registrationFrame
+        frame:SetSize(360, 104 + #choices * 28)
+        frame.title:SetText(title)
+        for _, button in ipairs(frame.buttons) do
+            button:Hide()
+        end
+        for index, choice in ipairs(choices) do
+            local button = frame.buttons[index]
+            if not button then
+                local created = call("CreateFrame", "Button", nil, frame, "UIPanelButtonTemplate")
+                if not created or not created[2] then
+                    error("Button creation unavailable")
+                end
+                button = created[2]
+                button:SetSize(328, 24)
+                button:SetPoint("TOPLEFT", 16, -64 - (index - 1) * 28)
+                frame.buttons[index] = button
+            end
+            button:SetText(choice.label)
+            button:SetScript("OnClick", function()
+                if choice.run() then
+                    Api.HideRegistrationPrompt()
+                end
+            end)
+            button:Show()
+        end
+        frame:Show()
+    end)
+    if not ok then
+        capabilities.registrationPrompt = "error: " .. tostring(err):sub(1, 160)
+        Api.HideRegistrationPrompt()
+        Api.Print("Registration window unavailable; use /rq add, /rq link <slot>, or /rq ignore.")
+        return false
+    end
+    capabilities.registrationPrompt = "available"
+    return true
 end
 
 function Api.Print(message)

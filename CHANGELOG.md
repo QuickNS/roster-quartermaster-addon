@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.0.2 - Database and snapshots
+
+- Added transactional, idempotent schema-1 to schema-2 migration with validation
+  of consumed nested data and roster links.
+- Added account-wide timestamped character snapshots and independent per-character
+  copies, GUID rename reconciliation, and normalized name/realm fallback promotion.
+- Added explicit add/link/ignore registration, editable provisional labels,
+  a combat-safe native prompt, and slash-command fallback.
+- Added money, location, equipped bag-capacity, and profession skill adapters.
+- Added targeted event updates with 0.25-second coalescing, synchronous logout
+  capture, and incomplete-section markers that preserve older observations.
+- Added roster/slot diagnostics with timestamps and stale-state warnings.
+- Added migration, registration, and snapshot tests, plus schema and upgrade docs.
+- New APIs, events, UI, and migration still require Forever client testing; the
+  previously reported smoke-test pass applies to version 0.0.1.
+
 ## 0.0.1 - Compatibility spike
 
 - Added an explicit-load-order Lua 5.1 addon skeleton.
