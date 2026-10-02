@@ -26,7 +26,11 @@ function Card.Age(timestamp, now)
     return math.floor(elapsed / 86400) .. "d ago"
 end
 
-function Card.Build(id, record, entry, now, activeId, staleHours)
+function Card.Rested(estimate)
+    return text(RQ.RestedEstimator.Describe(estimate))
+end
+
+function Card.Build(id, record, entry, now, activeId, staleHours, estimate)
     entry = entry or {}
     local identity, snapshot = record.identity, record.snapshot
     local lines = {
@@ -63,6 +67,9 @@ function Card.Build(id, record, entry, now, activeId, staleHours)
             .. text(snapshot.bagSlots),
     }
     local professions = {}
+    if estimate then
+        lines[4] = Card.Rested(estimate)
+    end
     for _, professionId in ipairs(RQ.Util.Keys(snapshot.professions or {})) do
         local profession = snapshot.professions[professionId]
         professions[#professions + 1] = text(profession.name)

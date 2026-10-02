@@ -43,6 +43,10 @@ function Diagnostics.Roster()
         return
     end
     local now = RQ.Api.GetServerTime()
+    local planning, planningError = RQ.PlanningService.Evaluate()
+    if not planning then
+        RQ.Api.Print("Rested planning unavailable: " .. planningError)
+    end
     local count = 0
     for _, id in ipairs(RQ.Util.Keys(RQDB.characters)) do
         local record = RQDB.characters[id]
@@ -87,6 +91,9 @@ function Diagnostics.Roster()
                     .. "; resting: "
                     .. display(snapshot.wasResting)
             )
+            if planning then
+                RQ.Api.Print("  " .. RQ.RestedEstimator.Describe(planning.estimates[id]))
+            end
             for _, section in ipairs(RQ.Util.Keys(RQ.Snapshot.fields)) do
                 local state = snapshot.sections[section]
                 if
@@ -135,12 +142,26 @@ function Diagnostics.Report()
         "Registration UI module: " .. (RQ.RegistrationPrompt and "loaded" or "NOT LOADED; reinstall complete addon"),
         "Dashboard modules: "
             .. (
-                RQ.MainWindow and RQ.RosterPanel and RQ.CharacterCard and "loaded"
+                RQ.MainWindow and RQ.RosterPanel and RQ.CharacterCard and RQ.TodayPanel and "loaded"
                 or "NOT LOADED; reinstall complete addon"
             ),
     }
     local record = RQ.Database.Current()
     if record then
+        local calibration = record.restedState.calibration
+        local comparison = record.restedState.comparison
+        lines[#lines + 1] = "Rested assumptions: unverified; configure rates/cap in /rq planning"
+        lines[#lines + 1] = "Pinned character: " .. display(RQDB.settings.planning.pinnedCharacterId)
+        lines[#lines + 1] = "Calibration samples: inn=" .. #calibration.inside .. "; outside=" .. #calibration.outside
+        lines[#lines + 1] = "Last calibration: " .. display(comparison and comparison.reason)
+        if comparison then
+            lines[#lines + 1] = "Calibration predicted="
+                .. display(comparison.estimated)
+                .. "; observed="
+                .. display(comparison.actual)
+                .. "; error="
+                .. display(comparison.error)
+        end
         lines[#lines + 1] = "Record: " .. RQCharDB.characterId .. "; registration: " .. record.registration
         lines[#lines + 1] = "Saved snapshot: "
             .. RQ.Snapshot.Freshness(record.snapshot, api.GetServerTime(), RQDB.policies.staleSnapshotHours)

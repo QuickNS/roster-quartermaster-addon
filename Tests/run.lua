@@ -186,8 +186,8 @@ test("TOC load order, scoped initialization, login and logout", function()
     emit("ADDON_LOADED", "UnrelatedAddon")
     equal(RQDB, nil)
     emit("ADDON_LOADED", "RosterQuartermaster")
-    equal(RQDB.schemaVersion, 3)
-    equal(RQCharDB.schemaVersion, 3)
+    equal(RQDB.schemaVersion, 4)
+    equal(RQCharDB.schemaVersion, 4)
     emit("PLAYER_LOGIN")
     equal(RQCharDB.identity.guid, "Player-Test-1")
     equal(RQCharDB.identity.class, "WARRIOR")
@@ -210,7 +210,7 @@ test("diagnostics include observed build, snapshot and capability output", funct
     contains(messages, "GUID: Player-Test-1")
     contains(messages, "Level: 25; XP: 12000/40000")
     contains(messages, "Rested XP (observed): 20000; resting: false")
-    contains(messages, "Schemas: account=3; character=3")
+    contains(messages, "Schemas: account=4; character=4")
     contains(messages, "Last saved observation (server timestamp): 123456789")
 end)
 
@@ -441,6 +441,7 @@ assert(loadfile("Tests/MigrationTests.lua"))()(helpers)
 assert(loadfile("Tests/SnapshotServiceTests.lua"))()(helpers)
 assert(loadfile("Tests/RegistrationTests.lua"))()(helpers)
 assert(loadfile("Tests/DashboardTests.lua"))()(helpers)
+assert(loadfile("Tests/PlanningTests.lua"))()(helpers)
 
 local failed = 0
 for _, item in ipairs(tests) do

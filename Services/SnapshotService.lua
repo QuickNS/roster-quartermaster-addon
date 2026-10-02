@@ -38,7 +38,11 @@ function Service.Capture(sections, logout)
     if logout then
         snapshot.lastLogout = now
     end
-    return RQ.Database.SaveSnapshot(snapshot)
+    local ok, err = RQ.Database.SaveSnapshot(snapshot)
+    if ok and logout then
+        RQ.PlanningService.Logout(snapshot)
+    end
+    return ok, err
 end
 
 function Service.Refresh()
@@ -47,7 +51,13 @@ function Service.Refresh()
     if not record then
         return false, err
     end
-    return Service.Capture()
+    local firstLogin = not Service.sessionStarted
+    Service.sessionStarted = true
+    local ok, captureError = Service.Capture()
+    if firstLogin then
+        RQ.PlanningService.Login(ok)
+    end
+    return ok, captureError
 end
 
 function Service.CancelPending()

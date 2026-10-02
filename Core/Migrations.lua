@@ -130,6 +130,11 @@ local function prepareRecord(record, path)
     then
         return nil, path .. ".recipes is invalid; original data preserved."
     end
+    local restedState, restedError = RQ.PlanningConfig.PrepareState(record.restedState)
+    if not restedState then
+        return nil, path .. ": " .. restedError .. " Original data preserved."
+    end
+    record.restedState = restedState
     return record
 end
 
@@ -143,6 +148,7 @@ local function root(value, label)
         and value.schemaVersion ~= 1
         and value.schemaVersion ~= 2
         and value.schemaVersion ~= 3
+        and value.schemaVersion ~= 4
     then
         return nil, label .. " has an unsupported schema; original data preserved."
     end
@@ -159,11 +165,22 @@ function Migrations.Prepare(accountValue, characterValue)
     if not character then
         return nil, nil, err
     end
-    for _, field in ipairs({ "settings", "roster", "characters", "policies" }) do
+    local seedLegacy = (account.schemaVersion or 1) < 4
+    for _, field in ipairs({ "settings", "roster", "characters", "policies", "session" }) do
         local value
         value, err = tableField(account, field, "RQDB")
         if not value then
             return nil, nil, err
+        end
+    end
+    local planning, planningError = RQ.PlanningConfig.Prepare(account.settings.planning)
+    if not planning then
+        return nil, nil, planningError .. " Original data preserved."
+    end
+    account.settings.planning = planning
+    for _, field in ipairs({ "currentCharacterId", "previousCharacterId" }) do
+        if account.session[field] ~= nil and not RQ.Util.IsText(account.session[field]) then
+            return nil, nil, "Invalid session character ID; original data preserved."
         end
     end
     local window
@@ -216,6 +233,19 @@ function Migrations.Prepare(accountValue, characterValue)
         return nil, nil, "RQCharDB.characterId is invalid; original data preserved."
     end
     for id, entry in pairs(account.roster) do
+        for key, default in pairs({
+            restedMultiplier = 1,
+            restedRevision = 0,
+            resourceBlocker = false,
+            dungeonReady = false,
+        }) do
+            if entry[key] == nil then
+                entry[key] = default
+            end
+        end
+        if not RQ.PlanningConfig.ValidEntry(entry) then
+            return nil, nil, "Invalid character planning settings; original data preserved."
+        end
         if entry.enabled == nil then
             entry.enabled = true
         end
@@ -238,6 +268,9 @@ function Migrations.Prepare(accountValue, characterValue)
         if not prepared then
             return nil, nil, err
         end
+        if seedLegacy and record.restedState.logout == nil then
+            record.restedState.logout = RQ.RestedEstimator.LogoutSample(record.snapshot, planning, account.roster[id])
+        end
         if record.registration == nil then
             record.registration = account.roster[id] and "member" or "pending"
         end
@@ -251,6 +284,11 @@ function Migrations.Prepare(accountValue, characterValue)
         if record.registration == "member" and not account.roster[id] then
             return nil, nil, "RQDB.characters has a member without roster configuration; original data preserved."
         end
+    end
+    if (character.schemaVersion or 1) < 4 and character.restedState.logout == nil then
+        local id = RQ.Character.Id(character.identity)
+        character.restedState.logout =
+            RQ.RestedEstimator.LogoutSample(character.snapshot, planning, id and account.roster[id])
     end
     for id, slot in pairs(slots) do
         if slot.claimedBy and (not account.roster[slot.claimedBy] or account.roster[slot.claimedBy].slotId ~= id) then

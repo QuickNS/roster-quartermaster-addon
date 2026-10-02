@@ -1,7 +1,7 @@
 local Panel = {}
 RQ.RosterPanel = Panel
 
-function Panel.Build(account, activeId, now, selectedId, selectedSlot)
+function Panel.Build(account, activeId, now, selectedId, selectedSlot, estimates)
     local characterIds = RQ.Util.Keys(account.characters)
     local slotIds = RQ.Util.Keys(account.plannedRoster)
     if not selectedId or not account.characters[selectedId] then
@@ -18,7 +18,8 @@ function Panel.Build(account, activeId, now, selectedId, selectedSlot)
             account.roster[id],
             now,
             activeId,
-            account.policies.staleSnapshotHours
+            account.policies.staleSnapshotHours,
+            estimates and estimates[id]
         )
     end
     for _, id in ipairs(slotIds) do
@@ -59,6 +60,11 @@ function Panel.Build(account, activeId, now, selectedId, selectedSlot)
         roleLabel = text(entry and (RQ.Character.roleLabels[entry.role] or entry.role) or "Unassigned"),
         isMember = record and record.registration == "member" and entry and entry.enabled == true or false,
         isMain = entry and entry.isMain == true or false,
+        multiplier = entry and entry.restedMultiplier or 1,
+        resourceBlocker = entry and entry.resourceBlocker == true or false,
+        dungeonReady = entry and entry.dungeonReady == true or false,
+        isPinned = selectedId ~= nil and account.settings.planning.pinnedCharacterId == selectedId,
+        planning = account.settings.planning,
         isIgnored = record and record.registration == "ignored" or false,
         canUnlink = entry and entry.slotId ~= nil or false,
         canLink = record ~= nil

@@ -42,9 +42,13 @@ local function openDashboard(tab, toggle)
             return
         end
     else
-        RQ.Api.Print("Dashboard module did not load; reinstall all UI files and the TOC. Showing text roster.")
+        RQ.Api.Print("Dashboard module did not load; reinstall all UI files and the TOC. Showing text fallback.")
     end
-    RQ.Diagnostics.Roster()
+    if tab == "today" or (not tab and (not RQ.MainWindow or RQ.MainWindow.tab == "today")) then
+        RQ.PlanningService.TextReport()
+    else
+        RQ.Diagnostics.Roster()
+    end
 end
 
 local minimapWarning = false
@@ -125,6 +129,23 @@ RQ.Api.RegisterSlashCommand(function(message)
         end
     elseif command == "settings" then
         openDashboard("settings")
+    elseif command == "planning" then
+        openDashboard("planning")
+    elseif command == "today" then
+        if argument:lower() == "text" then
+            RQ.PlanningService.TextReport()
+        else
+            openDashboard("today")
+        end
+    elseif command == "pin" then
+        local id, err = RQ.Database.ResolveMember(argument)
+        if not id then
+            configurationResult(false, err)
+        else
+            configurationResult(RQ.Database.Pin(id))
+        end
+    elseif command == "unpin" then
+        configurationResult(RQ.Database.Unpin())
     elseif command == "close" then
         RQ.Api.HideRosterWindow()
     elseif command == "main" then
@@ -158,7 +179,8 @@ RQ.Api.RegisterSlashCommand(function(message)
     else
         RQ.Api.Print(
             "Available commands: /rq, diag, rescan, roster [text], settings, close, slots, register, add, "
-                .. "link <slot>, ignore, name <slot> <name>, main [ID], role <role> [ID], unlink [ID], reset-window."
+                .. "link <slot>, ignore, name <slot> <name>, main [ID], role <role> [ID], unlink [ID], reset-window, "
+                .. "today [text], planning, pin <name|slot|ID>, unpin."
         )
     end
 end)

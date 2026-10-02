@@ -10,6 +10,8 @@ See [BETA_API_NOTES.md](BETA_API_NOTES.md) for the evidence and its limits.
 That report applies to **0.0.1**, not the later features below. The missing-UI
 installation problem in 0.0.2 was identified separately. Complete Milestone 1/2
 acceptance results have not been reported; the 0.0.4 dashboard/minimap tests are pending.
+The 0.0.5 Today/Planning, schema-4 migration, and rested-calibration checks below
+also remain pending; automated mocks are not in-client evidence.
 
 Back up SavedVariables before testing. Do not delete existing user data to
 simulate a clean installation; use a backed-up test profile instead.
@@ -24,7 +26,7 @@ simulate a clean installation; use a backed-up test profile instead.
    the client. Check the build/interface values against the installation evidence.
 6. Check that missing/failed APIs appear explicitly in the capability list.
    A reported numeric project ID must not be treated as confirmation of flavour.
-7. Confirm account and character schema versions are `3` and the SavedVariables
+7. Confirm account and character schema versions are `4` and the SavedVariables
    status is `initialized`.
 8. Confirm the login events are `observed`, while logout is not claimed observed
    before it has occurred.
@@ -53,7 +55,7 @@ Inventory bags/bank/mail and recipe sources remain unscanned in this milestone.
 
 1. Close the client and back up both SavedVariables files. Keep the backup outside
    the addon directory. Install all runtime directories listed in the README.
-2. Log into a character used with 0.0.1 or 0.0.2/0.0.3. Confirm schema 3, retained custom settings
+2. Log into a character used with 0.0.1 through 0.0.4. Confirm schema 4, retained custom settings
    and prior logout timestamp, and a new account character record. Registration
    must remain pending until you choose; a matching planned name is not consent.
 3. Choose **Link** to the intended slot, or use `/rq link warrior` on the main.
@@ -75,8 +77,8 @@ Inventory bags/bank/mail and recipe sources remain unscanned in this milestone.
 
 ## Snapshot freshness
 
-1. Verify `/rq roster` labels offline values as last observed, not exact current
-   state or estimated rested XP.
+1. Verify `/rq roster` labels offline snapshots as last observed, not exact current
+   state. The separate rested field must say estimated offline or unknown.
 2. Use an old offline snapshot or a backed-up test profile to check the 48-hour
    stale threshold and visible server timestamps.
 3. In the test profile, make one section stale while the overall snapshot is
@@ -93,7 +95,7 @@ Inventory bags/bank/mail and recipe sources remain unscanned in this milestone.
 3. Verify the 800x600 window at 1080p and the available ultrawide/UI-scale settings:
    no clipped controls, readable labels, accessible scrollbar, and visible Close.
 4. Scroll through all known and provisional character cards. Check actual and
-   planned names, race/class, roles, main flag, XP, last-observed rested XP,
+   planned names, race/class, roles, main flag, XP, labelled rested XP,
    professions, location/resting state, timestamps, age, and uncertainty warnings.
 5. Click Configure on an offline card. Use Add / resume, Make main, and the role
    button. Confirm only the selected character changes; the active snapshot and
@@ -116,6 +118,56 @@ Inventory bags/bank/mail and recipe sources remain unscanned in this milestone.
     functioning slash fallback, with no broken registration commands.
 12. Check that hidden panels are not rebuilt on snapshot events. Visible panels
     should update after events without losing the current selection.
+
+## Rested planning and Today (0.0.5)
+
+1. Install the **complete** 0.0.5 addon and TOC after backing up SavedVariables.
+   Confirm schema 4 and prior registrations, names, roles, and window position.
+2. Open `/rq today`. With enabled members, confirm a **Play next** card, other ranked
+   members, confidence, and two or three ranking reasons each. With no enabled
+   members, expect registration guidance instead of an invented recommendation.
+3. Confirm active rested XP agrees with the client and says **observed live**.
+   An unavailable API must show unknown, never a cached value labelled live.
+4. On a below-cap character, note XP/XPMax and rested XP, rest in an inn, then
+   log out normally. Log into another member and open Today/Roster. The first
+   character's rested value must say **estimated offline**, not exact or live.
+   Without a complete logout baseline, unknown with an explanation is correct.
+5. Leave the first character offline at least five minutes without gaining XP.
+   Log back in and inspect `/rq diag` and Today: compare predicted and actual
+   XP, error, and the accepted/rejected calibration reason. If actual positive
+   gain is uncapped and XP/level/XPMax unchanged, the inn sample count should grow.
+   Repeat after logging out outside an inn; its samples must remain separate.
+   Record observed rates rather than assuming the defaults are Forever facts.
+6. Use `/rq rescan` and change zones: calibration sample counts must not grow again
+   within the same login. A short `/reload` should not add a positive rate sample.
+   Capped, zero-gain, changed-XP, or incomplete observations should explain rejection.
+7. Use **Pin next** on a lower-ranked character, then reopen Today. It must become
+   first even when another member is near cap or the main needs a lead.
+   Test `/rq pin warrior`, `/rq unpin`, and card Unpin. Pin, reload, and switch
+   characters: the pin should persist. Ignoring that member should clear it.
+8. In `/rq planning`, verify the displayed default units: 0.625% inn/hour,
+   0.15625% outside/hour, 150% cap, 90% near-cap, 5-level lead after all 25,
+   10-level lag, and level cap 60. These are editable, unverified assumptions.
+   Save a changed value, reopen/reload, and verify persistence. Restore it afterward.
+   Empty, nonnumeric, zero cap, and out-of-range settings must report errors and
+   leave saved assumptions unchanged.
+9. Select a member in Planning, change its rate multiplier, and reset calibration.
+   Learned samples and its old logout baseline must clear; a new logout is needed
+   for offline estimates. Changing a selected offline member must not capture
+   current-character API values into that member.
+10. Toggle manual Resource blocker and Dungeon ready. Verify the chosen member's
+    reasons/score change, without claiming an inventory or quest scan occurred.
+    Clear both toggles after the test.
+11. Confirm main-lead preference begins only after all enabled members have reached
+    the configured starting level. A near-cap member overrides that lead; a manual
+    blocker overrides ordinary rotation. Stale level evidence must remain explicit.
+    Automated fixtures cover these boundaries when the live roster cannot.
+12. Type into a Planning field while snapshot events occur: a focused draft must
+    survive. Test all four tabs, scrolling, switching back to Today at the top,
+    Close/Escape, combat hiding, and layout at your usual UI scale.
+13. Confirm `/rq today text` remains usable without the dashboard; recommendations
+    still include reasons and rested provenance. Retest full-restart persistence,
+    not just `/reload`, and record actual client results separately from mocks.
 
 ## Reload and restart persistence
 
@@ -149,5 +201,5 @@ Do not report a full restart pass based on a successful `/reload`.
 5. Confirm there are no per-frame bag scans or background inventory work.
 6. Record actual results and client build in `BETA_API_NOTES.md`.
 
-Planning logic, item-level bags/bank/mail, profession planning,
+Item-level bags/bank/mail, profession/material planning,
 checklists, and import/export need separate acceptance tests as they are added.

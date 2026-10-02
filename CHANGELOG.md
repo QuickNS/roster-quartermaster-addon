@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.0.5 - Rested estimation and play-next recommendations
+
+- Added Today recommendations with deterministic ranking, two/three reasons,
+  explicit confidence, and persistent pin/unpin overrides.
+- Implemented hard pin, near-rested-cap, main-lead, and manual-blocker priorities,
+  plus configurable weighted factors and previous-character session history.
+- Added offline rested estimates from complete logout baselines; live API values
+  remain observed, and unavailable evidence remains unknown.
+- Added bounded, separate inn/outside login calibration with prediction comparison,
+  unchanged-XP/uncapped sampling rules, and manual perk/multiplier reset.
+- Added a Planning tab for provisional rates/caps, level policy, member multipliers,
+  and manual blocker/dungeon signals. No unverified Legacy/quest scan is assumed.
+- Added transactional schema-4 planning/calibration/session migration, independent
+  per-character state copies, and pin/session rekeying on GUID promotion.
+- Added `/rq today [text]`, `/rq planning`, `/rq pin <name|slot|ID>`, `/rq unpin`,
+  and calibration diagnostics. The dashboard initially opens Today.
+- Rested mechanics and new native UI behavior still require Forever client testing.
+
 ## 0.0.4 - Roster dashboard and minimap launcher
 
 - Added a native minimap button with hover tooltip to open/close the dashboard.

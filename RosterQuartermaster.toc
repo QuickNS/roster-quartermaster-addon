@@ -2,7 +2,7 @@
 ## Title: Roster Quartermaster
 ## Notes: Account-wide roster snapshots for World of Warcraft: Forever.
 ## Author: Roster Quartermaster contributors
-## Version: 0.0.4
+## Version: 0.0.5
 ## SavedVariables: RQDB
 ## SavedVariablesPerCharacter: RQCharDB
 
@@ -10,14 +10,20 @@ Core/Namespace.lua
 Core/Util.lua
 Core/Api.lua
 Data/DefaultRoster.lua
+Data/DefaultPolicies.lua
+Core/PlanningConfig.lua
 Models/Character.lua
 Models/Snapshot.lua
+Services/RestedEstimator.lua
+Services/PriorityEngine.lua
 Core/Migrations.lua
 Core/Database.lua
+Services/PlanningService.lua
 Services/SnapshotService.lua
 UI/RegistrationPrompt.lua
 UI/CharacterCard.lua
 UI/RosterPanel.lua
+UI/TodayPanel.lua
 UI/MainWindow.lua
 Core/Diagnostics.lua
 Bootstrap.lua

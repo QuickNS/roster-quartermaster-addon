@@ -49,6 +49,15 @@ function Database.Attach(identity)
                 slot.claimedBy = id
             end
         end
+        local planning = RQDB.settings.planning
+        if planning.pinnedCharacterId == fallback then
+            planning.pinnedCharacterId = id
+        end
+        for _, field in ipairs({ "currentCharacterId", "previousCharacterId" }) do
+            if RQDB.session[field] == fallback then
+                RQDB.session[field] = id
+            end
+        end
     end
     local record = RQDB.characters[id]
     if not record then
@@ -59,6 +68,7 @@ function Database.Attach(identity)
             snapshot = matching and RQ.Util.Copy(RQCharDB.snapshot) or { sections = {} },
             inventory = matching and RQ.Util.Copy(RQCharDB.inventory) or RQ.Snapshot.NewInventory(),
             recipes = matching and RQ.Util.Copy(RQCharDB.recipes) or RQ.Snapshot.EmptySource(),
+            restedState = matching and RQ.Util.Copy(RQCharDB.restedState) or RQ.PlanningConfig.PrepareState(nil),
             registration = RQDB.roster[id] and "member" or "pending",
         }
         RQDB.characters[id] = record
@@ -74,6 +84,7 @@ function Database.Attach(identity)
     RQCharDB.snapshot = RQ.Util.Copy(record.snapshot)
     RQCharDB.inventory = RQ.Util.Copy(record.inventory)
     RQCharDB.recipes = RQ.Util.Copy(record.recipes)
+    RQCharDB.restedState = RQ.Util.Copy(record.restedState)
     Database.activeId = id
     Database.NotifyChanged()
     return record, nil, id
@@ -115,6 +126,9 @@ function Database.Register(action, slotId, characterId)
             if entry.slotId then
                 RQDB.plannedRoster[entry.slotId].isMain = false
             end
+            if RQDB.settings.planning.pinnedCharacterId == id then
+                RQDB.settings.planning.pinnedCharacterId = nil
+            end
         end
         Database.NotifyChanged()
         return true
@@ -137,7 +151,14 @@ function Database.Register(action, slotId, characterId)
         if not entry or entry.slotId ~= slotId then
             local merged = RQ.Util.Copy(entry or {})
             for key, value in pairs(slot) do
-                merged[key] = RQ.Util.Copy(value)
+                if
+                    key ~= "restedMultiplier"
+                    and key ~= "restedRevision"
+                    and key ~= "resourceBlocker"
+                    and key ~= "dungeonReady"
+                then
+                    merged[key] = RQ.Util.Copy(value)
+                end
             end
             entry = merged
         end
@@ -161,6 +182,16 @@ function Database.Register(action, slotId, characterId)
         entry[key] = value
     end
     entry.enabled = true
+    for key, default in pairs({
+        restedMultiplier = 1,
+        restedRevision = 0,
+        resourceBlocker = false,
+        dungeonReady = false,
+    }) do
+        if entry[key] == nil then
+            entry[key] = default
+        end
+    end
     RQDB.roster[id] = entry
     record.registration = "member"
     if entry.isMain then
@@ -257,6 +288,150 @@ function Database.SaveWindowPosition(position)
         return false, "Invalid window position; previous position preserved."
     end
     RQDB.settings.window = RQ.Util.Copy(position)
+    return true
+end
+
+function Database.SaveRestedState(id, state)
+    if not Database.initialized or not RQDB.characters[id] then
+        return false, "Character record unavailable."
+    end
+    local prepared, err = RQ.PlanningConfig.PrepareState(state)
+    if not prepared then
+        return false, err
+    end
+    RQDB.characters[id].restedState = prepared
+    if id == Database.activeId then
+        RQCharDB.restedState = RQ.Util.Copy(prepared)
+    end
+    Database.NotifyChanged()
+    return true
+end
+
+function Database.BeginSession()
+    if not Database.Current() then
+        return
+    end
+    if RQDB.session.currentCharacterId ~= Database.activeId then
+        RQDB.session.previousCharacterId = RQDB.session.currentCharacterId
+        RQDB.session.currentCharacterId = Database.activeId
+    end
+end
+
+function Database.ResolveMember(query)
+    if not Database.initialized then
+        return nil, Database.status
+    end
+    if not RQ.Util.IsText(query) then
+        return nil, "Specify a character name, GUID, or linked slot."
+    end
+    local direct = member(query)
+    if direct then
+        return query
+    end
+    local normalized = query:lower()
+    local slot = RQDB.plannedRoster[normalized]
+    if slot and slot.claimedBy and member(slot.claimedBy) then
+        return slot.claimedBy
+    end
+    local matches = {}
+    for _, id in ipairs(RQ.Util.Keys(RQDB.roster)) do
+        local entry = member(id)
+        if entry then
+            local identity = RQDB.characters[id].identity
+            local full = identity.displayName and identity.realm and (identity.displayName .. "-" .. identity.realm)
+            for _, name in pairs({ identity.displayName, full, entry.plannedName }) do
+                if name:lower() == normalized then
+                    matches[#matches + 1] = id
+                    break
+                end
+            end
+        end
+    end
+    if #matches == 1 then
+        return matches[1]
+    end
+    if #matches > 1 then
+        return nil, "Ambiguous character; use a GUID: " .. table.concat(matches, ", ")
+    end
+    return nil, "No enabled roster member matches; use /rq roster text."
+end
+
+function Database.Pin(id)
+    local entry, err = member(id)
+    if not entry then
+        return false, err
+    end
+    RQDB.settings.planning.pinnedCharacterId = id
+    Database.NotifyChanged()
+    return true
+end
+
+function Database.Unpin()
+    if not Database.initialized then
+        return false, Database.status
+    end
+    RQDB.settings.planning.pinnedCharacterId = nil
+    Database.NotifyChanged()
+    return true
+end
+
+function Database.SetPlanning(values)
+    if not Database.initialized then
+        return false, Database.status
+    end
+    local updated = RQ.Util.Copy(RQDB.settings.planning)
+    for _, field in ipairs(RQ.PlanningFields) do
+        if values[field.key] == nil then
+            return false, "Missing planning value: " .. field.key
+        end
+        updated[field.key] = values[field.key]
+    end
+    local prepared, err = RQ.PlanningConfig.Prepare(updated)
+    if not prepared then
+        return false, err
+    end
+    local changed = false
+    for _, key in ipairs({ "innRate", "outsideRate", "capLevels", "maxLevel" }) do
+        changed = changed or prepared[key] ~= RQDB.settings.planning[key]
+    end
+    RQDB.settings.planning = prepared
+    if changed then
+        for id, record in pairs(RQDB.characters) do
+            record.restedState.calibration = RQ.RestedEstimator.EmptyCalibration(prepared, RQDB.roster[id])
+            if id == Database.activeId then
+                RQCharDB.restedState = RQ.Util.Copy(record.restedState)
+            end
+        end
+    end
+    Database.NotifyChanged()
+    return true
+end
+
+function Database.ResetCalibration(id, multiplier)
+    local entry, err = member(id)
+    if not entry then
+        return false, err
+    end
+    if multiplier ~= nil and (not RQ.Util.IsNumber(multiplier) or multiplier < 0.01 or multiplier > 100) then
+        return false, "Rested rate multiplier must be between 0.01 and 100."
+    end
+    entry.restedMultiplier = multiplier or entry.restedMultiplier
+    entry.restedRevision = entry.restedRevision + 1
+    return Database.SaveRestedState(id, {
+        calibration = RQ.RestedEstimator.EmptyCalibration(RQDB.settings.planning, entry),
+    })
+end
+
+function Database.SetPlanningSignal(id, signal, enabled)
+    local entry, err = member(id)
+    if not entry then
+        return false, err
+    end
+    if (signal ~= "resourceBlocker" and signal ~= "dungeonReady") or type(enabled) ~= "boolean" then
+        return false, "Invalid manual planning signal."
+    end
+    entry[signal] = enabled
+    Database.NotifyChanged()
     return true
 end
 

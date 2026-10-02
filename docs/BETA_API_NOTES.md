@@ -30,6 +30,15 @@ Version 0.0.4 adds the roster dashboard and requested native minimap launcher.
 Its UI, geometry, schema-3 upgrade, and configuration interactions have been
 tested with mocked frames only; visual compatibility in Forever remains pending.
 
+Version 0.0.5 adds Today/Planning tabs, schema-4 state, offline rested estimates and
+login calibration. All new behavior has automated mock coverage only. The initial
+inn/outside rates (0.625%/0.15625% of a level per hour), 150% rested cap, maximum
+level 60, and multiplier semantics are **provisional assumptions**, not verified
+Forever contracts. They are editable. There is no assumed Legacy perk API:
+perk changes require a manual multiplier update or calibration reset.
+Positive uncapped accumulation with unchanged level/XP/XPMax can calibrate rates,
+but cannot establish a true cap or prove perk semantics. Test those independently.
+
 No diagnostic transcript or separate per-test results were supplied. Individual
 API return values, event delivery details, and extended failure cases remain
 unconfirmed. No direct client access was available during implementation.

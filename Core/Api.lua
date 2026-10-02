@@ -464,6 +464,83 @@ function Api.ResetRosterWindowPosition()
     return true
 end
 
+local function planningControls(frame)
+    local panel = uiFrame("Frame", frame)
+    panel:SetPoint("TOPLEFT", 18, -88)
+    panel:SetPoint("BOTTOMRIGHT", -18, 42)
+    dashboard.planningPanel, dashboard.planningInputs = panel, {}
+    uiText(panel, 0, 0, 740, "GameFontNormal"):SetText(
+        "Provisional assumptions - verify Forever rates before relying on them"
+    )
+    for index, field in ipairs(RQ.PlanningFields) do
+        local y = -36 - (index - 1) * 34
+        uiText(panel, 0, y - 7, 300):SetText(field.label)
+        local edit = uiFrame("EditBox", panel, "InputBoxTemplate")
+        edit:SetSize(84, 28)
+        edit:SetPoint("TOPLEFT", 310, y)
+        edit:SetAutoFocus(false)
+        edit:SetMaxLetters(16)
+        edit:SetScript("OnEscapePressed", function()
+            edit:ClearFocus()
+            Api.HideRosterWindow()
+        end)
+        dashboard.planningInputs[field.key] = edit
+    end
+    uiButton(panel, "Save assumptions", 0, -316, 220, function()
+        local values = {}
+        for _, field in ipairs(RQ.PlanningFields) do
+            local edit = dashboard.planningInputs[field.key]
+            local value = tonumber(edit:GetText())
+            values[field.key] = value and value / field.scale
+            edit:ClearFocus()
+        end
+        dashboard.handlers.planning(values)
+    end)
+    uiText(panel, 0, -358, 400):SetText(
+        "Rates are percentages of a level per hour. Cap and rates are unverified.\n"
+            .. "Saving changed mechanics resets learned rates. A changed perk needs a new logout baseline."
+    )
+    dashboard.planningCharacter = uiText(panel, 430, -36, 310, "GameFontNormal")
+    dashboard.planningPrevious = uiButton(panel, "Previous", 430, -92, 100, function()
+        dashboard.handlers.character(-1)
+    end)
+    dashboard.planningNext = uiButton(panel, "Next", 540, -92, 100, function()
+        dashboard.handlers.character(1)
+    end)
+    uiText(panel, 430, -140, 175):SetText("Rested rate multiplier")
+    local edit = uiFrame("EditBox", panel, "InputBoxTemplate")
+    edit:SetSize(88, 28)
+    edit:SetPoint("TOPLEFT", 640, -132)
+    edit:SetAutoFocus(false)
+    edit:SetMaxLetters(16)
+    edit:SetScript("OnEscapePressed", function()
+        edit:ClearFocus()
+        Api.HideRosterWindow()
+    end)
+    dashboard.multiplierInput = edit
+    dashboard.saveMultiplier = uiButton(panel, "Save multiplier", 430, -174, 144, function()
+        local value = tonumber(edit:GetText())
+        edit:ClearFocus()
+        dashboard.handlers.multiplier(value)
+    end)
+    dashboard.resetCalibration = uiButton(panel, "Reset calibration", 584, -174, 156, function()
+        dashboard.handlers.resetCalibration()
+    end)
+    dashboard.blocker = uiButton(panel, "Resource blocker", 430, -218, 310, function()
+        dashboard.handlers.signal("resourceBlocker")
+    end)
+    dashboard.dungeon = uiButton(panel, "Dungeon ready", 430, -256, 310, function()
+        dashboard.handlers.signal("dungeonReady")
+    end)
+    dashboard.pin = uiButton(panel, "Pin selected", 430, -294, 310, function()
+        dashboard.handlers.pinSelected()
+    end)
+    uiText(panel, 430, -344, 310):SetText(
+        "Blocker and dungeon signals are manual, not quest or inventory scans.\n"
+            .. "After a rested perk changes, update the multiplier or reset calibration."
+    )
+end
+
 local function createDashboard(position, handlers)
     local frame = uiFrame("Frame", _G.UIParent, nil, "RQMainWindow")
     frame:Hide()
@@ -504,11 +581,17 @@ local function createDashboard(position, handlers)
     background:SetColorTexture(0.035, 0.035, 0.045, 0.97)
     dashboard.title = uiText(frame, 18, -16, 610, "GameFontNormalLarge")
     uiButton(frame, "Close", 712, -12, 72, Api.HideRosterWindow)
-    dashboard.rosterTab = uiButton(frame, "Roster", 18, -48, 120, function()
+    dashboard.todayTab = uiButton(frame, "Today", 18, -48, 100, function()
+        dashboard.handlers.tab("today")
+    end)
+    dashboard.rosterTab = uiButton(frame, "Roster", 126, -48, 100, function()
         dashboard.handlers.tab("roster")
     end)
-    dashboard.settingsTab = uiButton(frame, "Settings", 146, -48, 120, function()
+    dashboard.settingsTab = uiButton(frame, "Settings", 234, -48, 100, function()
         dashboard.handlers.tab("settings")
+    end)
+    dashboard.planningTab = uiButton(frame, "Planning", 342, -48, 110, function()
+        dashboard.handlers.tab("planning")
     end)
     uiButton(frame, "Rescan current", 618, -48, 166, function()
         dashboard.handlers.rescan()
@@ -593,6 +676,7 @@ local function createDashboard(position, handlers)
             .. "To change slots, unlink first. Ignore keeps the existing link; Add / resume enables tracking again.\n"
             .. "Selecting an offline character changes configuration only; it never logs into that character."
     )
+    planningControls(frame)
     if type(_G.UISpecialFrames) == "table" then
         local found = false
         for _, name in ipairs(_G.UISpecialFrames) do
@@ -626,7 +710,15 @@ function Api.RenderRosterWindow(view, handlers, position)
         )
         enable(dashboard.rosterTab, view.tab ~= "roster")
         enable(dashboard.settingsTab, view.tab ~= "settings")
-        if view.tab == "roster" then
+        enable(dashboard.todayTab, view.tab ~= "today")
+        enable(dashboard.planningTab, view.tab ~= "planning")
+        if view.tab ~= "planning" then
+            dashboard.planningPanel:Hide()
+        end
+        if dashboard.renderedTab ~= view.tab then
+            dashboard.scroll:SetVerticalScroll(0)
+        end
+        if view.tab == "roster" or view.tab == "today" then
             dashboard.settings:Hide()
             dashboard.scroll:Show()
             local y = 0
@@ -641,11 +733,16 @@ function Api.RenderRosterWindow(view, handlers, position)
                     row.title = uiText(row, 12, -10, 696, "GameFontNormal")
                     row.body = uiText(row, 12, -36, 696)
                     row.button = uiButton(row, "Configure", 580, -10, 130, function()
-                        dashboard.handlers.configure(row.characterId, row.slotId)
+                        if row.actionKind == "pin" then
+                            dashboard.handlers.pin(row.characterId)
+                        else
+                            dashboard.handlers.configure(row.characterId, row.slotId)
+                        end
                     end)
                     dashboard.cards[index] = row
                 end
                 row.characterId, row.slotId = card.id, card.slotId
+                row.actionKind = card.actionKind
                 row.title:SetText(card.title)
                 local titleHeight = row.title:GetStringHeight()
                 row.body:ClearAllPoints()
@@ -668,6 +765,35 @@ function Api.RenderRosterWindow(view, handlers, position)
             dashboard.scroll:SetVerticalScroll(
                 math.min(dashboard.scroll:GetVerticalScroll(), math.max(0, y - dashboard.scroll:GetHeight()))
             )
+        elseif view.tab == "planning" then
+            dashboard.scroll:Hide()
+            dashboard.settings:Hide()
+            dashboard.planningPanel:Show()
+            for _, field in ipairs(RQ.PlanningFields) do
+                local edit = dashboard.planningInputs[field.key]
+                if not edit:HasFocus() then
+                    edit:SetText(tostring(view.planning[field.key] * field.scale))
+                end
+            end
+            dashboard.planningCharacter:SetText(view.characterLabel)
+            enable(dashboard.planningPrevious, #view.characterIds > 1)
+            enable(dashboard.planningNext, #view.characterIds > 1)
+            for _, button in ipairs({
+                dashboard.saveMultiplier,
+                dashboard.resetCalibration,
+                dashboard.blocker,
+                dashboard.dungeon,
+                dashboard.pin,
+            }) do
+                enable(button, view.isMember)
+            end
+            if dashboard.multiplierCharacter ~= view.selectedId or not dashboard.multiplierInput:HasFocus() then
+                dashboard.multiplierInput:SetText(tostring(view.multiplier))
+                dashboard.multiplierCharacter = view.selectedId
+            end
+            dashboard.blocker:SetText("Resource blocker: " .. (view.resourceBlocker and "Yes" or "No"))
+            dashboard.dungeon:SetText("Dungeon ready: " .. (view.dungeonReady and "Yes" or "No"))
+            dashboard.pin:SetText(view.isPinned and "Unpin selected" or "Pin selected")
         else
             dashboard.scroll:Hide()
             dashboard.settings:Show()
@@ -694,6 +820,7 @@ function Api.RenderRosterWindow(view, handlers, position)
             end
         end
         dashboard.frame:Show()
+        dashboard.renderedTab = view.tab
     end)
     if not ok then
         dashboardFailure = err

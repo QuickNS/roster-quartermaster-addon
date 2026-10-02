@@ -1,7 +1,7 @@
-# SavedVariables schema 3
+# SavedVariables schema 4
 
 `RQDB` is account-wide; `RQCharDB` is per-character. Both declare
-`schemaVersion = 3`. Initialization happens after SavedVariables load.
+`schemaVersion = 4`. Initialization happens after SavedVariables load.
 
 ## Account state
 
@@ -9,6 +9,8 @@
 | --- | --- |
 | `settings` | Existing settings and user extensions are preserved. |
 | `settings.window` | Native window anchor: `point`, `relativePoint`, finite signed `x`/`y` offsets. |
+| `settings.planning` | Rates, cap, level rules, milestones, weights, optional pinned character ID. |
+| `session` | Current and previous character IDs; same-character reload does not rotate history. |
 | `policies.staleSnapshotHours` | Non-negative threshold, default 48 hours. |
 | `plannedRoster[slotId]` | Editable planning configuration, seeded once from `Data/DefaultRoster.lua`. |
 | `roster[characterId]` | Confirmed member configuration plus observed identity fields. |
@@ -54,7 +56,7 @@ Item inventory and recipes remain unknown until their later scanning milestones.
 ## Per-character state
 
 `RQCharDB` contains `characterId` plus independent copies of the current record's
-`identity`, `snapshot`, `inventory`, and `recipes`. There are no shared mutable
+`identity`, `snapshot`, `inventory`, `recipes`, and `restedState`. There are no shared mutable
 snapshot tables between the two SavedVariables roots. Unknown extension fields
 from the previous schema are preserved.
 
@@ -71,7 +73,7 @@ current character's snapshot.
 - A temporarily missing GUID may reuse the prior GUID only when actual name and
   realm still match. Missing all current identity evidence suspends capture.
 - When a GUID becomes available, the matching actual-name fallback record and
-  its slot/configuration links are rekeyed together.
+  its slot/configuration links, pin, and session references are rekeyed together.
 - Existing GUID and fallback records are not silently merged: capture is
   suspended and the conflict is reported. Restore a known-good backup or resolve
   the saved-data conflict with explicit user approval.
@@ -79,7 +81,7 @@ current character's snapshot.
   only a user action makes it a roster member or links a slot.
 - Ignore stops snapshot updates and excludes the record from text roster output.
   The dashboard keeps an ignored card for explicit re-enabling. Existing role
-  configuration and links are retained, but the main designation is cleared.
+  configuration and links are retained, but the main designation and pin are cleared.
 - Main selection clears other member and provisional-main flags. Linking another
   character never overrides an existing explicitly selected main.
 - Role changes update the member and its linked provisional slot. Offline
@@ -111,9 +113,9 @@ a money update does not make old profession or bag data current.
 
 ## Migration and corruption handling
 
-`Migrations.Prepare` copies both roots, accepts schema 1, 2, or 3 (or missing version
+`Migrations.Prepare` copies both roots, accepts schema 1, 2, 3, or 4 (or missing version
 on a partial database), fills absent containers, seeds absent provisional
-configuration, validates shapes/values/link consistency, and stamps schema 3.
+configuration, validates shapes/values/link consistency, and stamps schema 4.
 It is idempotent and preserves unknown fields and non-nil user configuration.
 It does not fabricate an observation timestamp for schema-1 snapshots.
 
@@ -134,3 +136,56 @@ The native window clamps itself to the screen when restored. UI frame references
 selected tabs/rows, drafts, minimap widgets, and refresh callbacks are runtime-only;
 they are never written to SavedVariables. The minimap launcher has a fixed
 lower-left anchor and adds no persistence fields.
+
+## Planning and rested state (schema 4)
+
+`settings.planning` defaults come from `Data/DefaultPolicies.lua`. Rates are **levels
+per hour**, `capLevels` is levels of XP, and `nearCapRatio` is a fraction of that cap.
+The Planning UI displays these as percentages. Numeric settings, positive ascending
+milestone arrays, bounded finite signed weights, and optional pin IDs are validated.
+Unknown extension fields remain preserved. Initial mechanics are unverified.
+
+Members have `restedMultiplier = 1`, `restedRevision = 0`, `resourceBlocker = false`,
+and `dungeonReady = false`. The multiplier affects accumulation rate, not the
+global cap. The boolean signals are manually configured, not observed quest or
+inventory state. Resetting calibration increments the revision and clears both
+learned samples and the old baseline.
+
+Each character has:
+
+```lua
+restedState = {
+    calibration = { profile = "", inside = {}, outside = {} },
+    -- Optional logout: at, level, xp, xpMax, restedXp, wasResting,
+    --                  multiplier, revision, profile
+    -- Optional comparison: at, accepted, reason, estimated, actual, error, observedRate
+}
+```
+
+A profile identifies global rates/cap/maximum level and member multiplier/revision.
+Only eight numeric samples per location and the latest comparison are retained.
+Calibration records **base** rates; the member multiplier is applied when estimating.
+Profile changes reset learned rates. Changed global mechanics retain the observed
+baseline for estimates but reject learning across that change.
+
+Only complete progression/rested/location sections observed at the exact logout
+timestamp can create a baseline. A clock failure or incomplete logout removes the
+baseline rather than reusing an old one. Pre-schema-4 snapshots can seed one only
+when these conditions hold and `lastSeen == lastLogout`; schema 4 never recreates
+a consumed baseline during migration.
+
+The first successful identity reconciliation of a login starts session history and
+consumes the baseline, comparing newly captured rested XP when available. Learning
+requires an interval of at least 300 seconds, unchanged level/XP/XPMax, complete
+login observations, unchanged profile, positive gain and no configured cap censoring.
+Ignored logins discard the baseline without capture. Rescans do not recalibrate.
+The next synchronous logout establishes the next baseline. Crashes may leave no
+usable logout evidence; the result is unknown, not invented offline accumulation.
+
+`PriorityEngine.Evaluate(account, records, settings, context)` is pure and uses the
+repository's dot-call convention. Explicit context supplies time, active ID and live
+API values; the engine does not fetch time or call game APIs. It returns ordered
+recommendations (ID, score, tier, confidence, two/three reasons, estimate), an error
+slot, estimates keyed by ID, and global warnings. Tiers precede score, then stable
+character ID breaks ties. The planning service supplies API context, text output,
+and persistence orchestration; the Today panel only builds a view model.

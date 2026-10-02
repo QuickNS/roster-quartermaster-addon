@@ -1,12 +1,28 @@
-local Window = { tab = "roster", dirty = true, scheduled = false, status = "" }
+local Window = { tab = "today", dirty = true, scheduled = false, status = "" }
 RQ.MainWindow = Window
 
 local function model()
     if not RQ.RosterPanel or not RQ.CharacterCard then
         return nil, "Dashboard modules did not load; reinstall the complete addon."
     end
-    local view =
-        RQ.RosterPanel.Build(RQDB, RQ.Database.activeId, RQ.Api.GetServerTime(), Window.selectedId, Window.selectedSlot)
+    local report, err = RQ.PlanningService.Evaluate()
+    if not report then
+        return nil, err
+    end
+    local view = RQ.RosterPanel.Build(
+        RQDB,
+        RQ.Database.activeId,
+        report.now,
+        Window.selectedId,
+        Window.selectedSlot,
+        report.estimates
+    )
+    if Window.tab == "today" then
+        if not RQ.TodayPanel then
+            return nil, "Today module did not load; reinstall the complete addon."
+        end
+        view.cards = RQ.TodayPanel.Build(RQDB, report)
+    end
     Window.selectedId, Window.selectedSlot = view.selectedId, view.selectedSlot
     view.tab = Window.tab
     view.status = Window.status
@@ -106,6 +122,33 @@ handlers.configure = function(id, slotId)
     Window.selectedSlot = slotId or Window.selectedSlot
     Window.status = ""
     Window.Open("settings")
+end
+handlers.pin = function(id)
+    if id == RQDB.settings.planning.pinnedCharacterId then
+        result(RQ.Database.Unpin())
+    else
+        result(RQ.Database.Pin(id))
+    end
+end
+handlers.pinSelected = function()
+    handlers.pin(Window.selectedId)
+end
+handlers.planning = function(values)
+    result(RQ.Database.SetPlanning(values))
+end
+handlers.multiplier = function(value)
+    if value == nil then
+        result(false, "Enter a numeric rested rate multiplier.")
+        return
+    end
+    result(RQ.Database.ResetCalibration(Window.selectedId, value))
+end
+handlers.resetCalibration = function()
+    result(RQ.Database.ResetCalibration(Window.selectedId))
+end
+handlers.signal = function(signal)
+    local entry = RQDB.roster[Window.selectedId]
+    result(RQ.Database.SetPlanningSignal(Window.selectedId, signal, entry and not entry[signal]))
 end
 handlers.character = function(delta)
     Window.selectedId = cycle(RQ.Util.Keys(RQDB.characters), Window.selectedId, delta)
