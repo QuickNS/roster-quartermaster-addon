@@ -89,8 +89,8 @@ function Service.CancelPending()
     Service.generation = Service.generation + 1
 end
 
-function Service.Register(action, slotId, characterId)
-    local ok, err = RQ.Database.Register(action, slotId, characterId)
+function Service.Register(action, characterId)
+    local ok, err = RQ.Database.Register(action, characterId)
     if not ok then
         RQ.Api.Print("Registration failed: " .. err)
         return false

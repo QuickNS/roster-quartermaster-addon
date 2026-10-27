@@ -29,6 +29,10 @@ function Util.DefaultWindowPosition()
     return { point = "CENTER", relativePoint = "CENTER", x = 0, y = 0 }
 end
 
+function Util.IsMinimapAngle(value)
+    return Util.IsNumber(value) and value < 360
+end
+
 function Util.IsWindowPosition(value)
     local points = {
         TOPLEFT = true,
@@ -59,4 +63,10 @@ function Util.Keys(value)
     end
     table.sort(keys)
     return keys
+end
+function RQ.Util.Money(value)
+    if not RQ.Util.IsNumber(value) or value % 1 ~= 0 then
+        return "unavailable"
+    end
+    return string.format("%dg %ds %dc", math.floor(value / 10000), math.floor(value / 100) % 100, value % 100)
 end

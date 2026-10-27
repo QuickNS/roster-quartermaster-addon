@@ -11,7 +11,7 @@ return function(h)
         local oldAccount, oldCharacter = RQDB, RQCharDB
         h.loadAddon()
         assert(RQ.Database.Initialize())
-        equal(RQDB.schemaVersion, 5)
+        equal(RQDB.schemaVersion, 19)
         equal(RQDB.settings.custom[1], 42)
         equal(RQDB.policies.staleSnapshotHours, 12)
         equal(RQCharDB.snapshot.level, 17)
@@ -27,20 +27,85 @@ return function(h)
         equal(oldAccount.settings.custom[1], 42)
     end)
 
-    test("migration is idempotent and preserves edited or deliberately empty slots", function()
+    test("schema sixteen retires features atomically while preserving dynamic roster and retained data", function()
+        h.fakeCharacter()
         h.loadAddon()
-        local account, character = RQ.Migrations.Prepare(nil, nil)
-        equal(#RQ.Util.Keys(account.plannedRoster), 5)
-        account.plannedRoster.druid.plannedName = "Luna Tick"
-        account.plannedRoster.rogue = nil
-        local second, char = RQ.Migrations.Prepare(account, character)
-        equal(second.plannedRoster.druid.plannedName, "Luna Tick")
-        equal(second.plannedRoster.rogue, nil)
-        equal(char.schemaVersion, 5)
-        second.plannedRoster = {}
-        local third = RQ.Migrations.Prepare(second, char)
-        equal(next(third.plannedRoster), nil)
-        equal(RQ.DefaultRoster.druid.plannedName, "Kit Cat")
+        h.emit("PLAYER_LOGIN")
+        assert(RQ.Database.Register("add"))
+        local id = RQ.Database.activeId
+        assert(RQ.Database.SetRole(id, "TANK"))
+        assert(RQ.Database.SetMain(id))
+        assert(RQ.Database.SetMain(id))
+        local record = RQ.Database.Current()
+        record.supplies.needs[5498] = 2
+        record.supplies.goals[197] = { recipeId = 3844, targetSkill = 100 }
+        record.professionIntent.planned[197] = true
+        record.inventory.bags.items[5498] = 1
+        record.inventory.bank.items[2589] = 20
+        record.inventory.mail.items[2592] = 10
+        local alt = RQ.Util.Copy(record)
+        alt.identity.guid, alt.registration = "Player-Alt", "pending"
+        RQDB.characters["Player-Alt"] = alt
+        assert(RQ.Database.Register("add", "Player-Alt"))
+        assert(RQ.Database.SetRole("Player-Alt", "HEALER"))
+        RQCharDB = RQ.Util.Copy(record)
+        local expectedAccount, expectedChar = RQ.Migrations.Prepare(RQDB, RQCharDB)
+        assert(expectedAccount and expectedChar)
+        local old, oldChar = RQ.Util.Copy(expectedAccount), RQ.Util.Copy(expectedChar)
+        old.schemaVersion, oldChar.schemaVersion = 15, 15
+        old.plannedRoster = { warrior = { claimedBy = id }, unclaimed = { plannedName = "Unused" } }
+        old.progress = { characters = { [id] = { perks = { retired = true } } } }
+        old.settings.gear = { enabled = true, customProfiles = { retired = true } }
+        old.roster[id].slotId, old.roster[id].plannedName = "warrior", "Old name"
+        old.roster["Player-Alt"].slotId = "priest"
+        oldChar.progress, oldChar.plannedRoster = {}, {}
+        old.checklists = { members = { [id] = { decisions = {} } } }
+        old.checklists.members[id].decisions["dungeon-review"] = { state = "dismiss", signature = "old" }
+        old.checklists.members[id].decisions["progress:trial"] = { state = "complete", signature = "old" }
+        local migrated, mirror, err = RQ.Migrations.Prepare(old, oldChar)
+        assert(migrated and mirror, err)
+        local function same(actual, expected)
+            equal(type(actual), type(expected))
+            if type(expected) ~= "table" then
+                equal(actual, expected)
+                return
+            end
+            for key, value in pairs(expected) do
+                same(actual[key], value)
+            end
+            for key in pairs(actual) do
+                assert(expected[key] ~= nil, "Unexpected migrated field: " .. tostring(key))
+            end
+        end
+        same(migrated, expectedAccount)
+        same(mirror, expectedChar)
+        local second, secondChar = RQ.Migrations.Prepare(migrated, mirror)
+        same(second, migrated)
+        same(secondChar, mirror)
+        equal(old.schemaVersion, 15)
+        equal(oldChar.schemaVersion, 15)
+        equal(old.roster[id].slotId, "warrior")
+        equal(old.settings.gear.enabled, true)
+        equal(old.plannedRoster.unclaimed.plannedName, "Unused")
+        equal(old.checklists.members[id].decisions["dungeon-review"].state, "dismiss")
+    end)
+
+    test("malformed retired settings do not block migration or seed roster members", function()
+        h.loadAddon()
+        local account = assert(RQ.Migrations.Prepare({
+            schemaVersion = 15,
+            plannedRoster = { warrior = { plannedName = false, claimedBy = "Player-Missing" } },
+            progress = false,
+            settings = { gear = false },
+        }, nil))
+        equal(account.plannedRoster, nil)
+        equal(account.progress, nil)
+        equal(account.settings.gear, nil)
+        equal(next(account.roster), nil)
+        equal(next(account.characters), nil)
+        local legacy = assert(RQ.Migrations.Prepare({ schemaVersion = 1 }, nil))
+        equal(legacy.plannedRoster, nil)
+        equal(next(legacy.roster), nil)
     end)
 
     test("corrupt nested state rejects both databases without partial migration", function()
@@ -53,9 +118,6 @@ return function(h)
             { characters = { ["Player-X"] = { registration = "member" } } },
             { policies = { staleSnapshotHours = -1 } },
             { policies = { staleSnapshotHours = 0 / 0 } },
-            { plannedRoster = { warrior = { plannedName = false } } },
-            { plannedRoster = { warrior = { claimedBy = "Player-X" } } },
-            { roster = { ["Player-X"] = { slotId = "missing" } } },
         }
         for index, account in ipairs(cases) do
             account.schemaVersion = 1

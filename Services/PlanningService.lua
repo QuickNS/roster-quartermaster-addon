@@ -79,7 +79,7 @@ function Planning.TextReport()
         return
     end
     if #report.recommendations == 0 then
-        RQ.Api.Print("No recommendation: register an enabled member using /rq add or /rq link <slot>.")
+        RQ.Api.Print("No recommendation: register an enabled member using /rq add.")
     end
     for index, result in ipairs(report.recommendations) do
         local identity = RQDB.characters[result.characterId].identity
@@ -95,6 +95,18 @@ function Planning.TextReport()
         RQ.Api.Print("  " .. RQ.RestedEstimator.Describe(result.estimate))
         for _, reason in ipairs(result.reasons) do
             RQ.Api.Print("  - " .. reason)
+        end
+        for _, line in
+            ipairs(
+                RQ.ProfessionStatus.Lines(
+                    RQDB.characters[result.characterId].snapshot,
+                    report.now,
+                    RQDB.policies.staleSnapshotHours,
+                    RQDB.settings.professionLag
+                )
+            )
+        do
+            RQ.Api.Print("  " .. line)
         end
     end
     for _, warning in ipairs(report.warnings) do

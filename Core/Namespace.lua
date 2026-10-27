@@ -1,5 +1,5 @@
 RQ = {
     name = "RosterQuartermaster",
-    version = "0.0.6",
-    schemaVersion = 5,
+    version = "0.0.38",
+    schemaVersion = 19,
 }

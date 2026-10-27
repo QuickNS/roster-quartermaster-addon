@@ -252,51 +252,6 @@ return function(h)
         return assert(RQ.PriorityEngine.Evaluate(account, records, settings, context or { now = at }))
     end
 
-    test("pin always beats cap and main lead despite adversarial weights", function()
-        local account, records, settings = roster()
-        records["b-alt"].restedState.logout.restedXp = 59000
-        equal(rank(account, records, settings)[1].characterId, "b-alt")
-        settings.pinnedCharacterId = "c-alt"
-        settings.weights.pinned = -100000
-        settings.weights.rested = 100000
-        local result = rank(account, records, settings)
-        equal(result[1].characterId, "c-alt")
-        assert(result[1].score < result[2].score)
-        contains(result[1].reasons, "Manually pinned")
-    end)
-
-    test("near-cap boundary wins over lead, otherwise main lead beats rotation and blockers", function()
-        local account, records, settings = roster()
-        account.roster["c-alt"].resourceBlocker = true
-        equal(rank(account, records, settings)[1].characterId, "a-main")
-        records["b-alt"].restedState.logout.restedXp = 53999
-        equal(rank(account, records, settings)[1].characterId, "a-main")
-        records["b-alt"].restedState.logout.restedXp = 54000
-        equal(rank(account, records, settings)[1].characterId, "b-alt")
-        records["b-alt"].restedState.logout.restedXp = 0
-        records["a-main"].snapshot.level = 30
-        equal(rank(account, records, settings)[1].characterId, "c-alt")
-    end)
-
-    test("main lead waits for all level 25 and deactivates at configured maximum", function()
-        local account, records, settings = roster()
-        records["c-alt"].snapshot.level = 24
-        for _, result in ipairs(rank(account, records, settings)) do
-            equal(result.priorityTier, 0)
-        end
-        records["c-alt"].snapshot.level = nil
-        for _, result in ipairs(rank(account, records, settings)) do
-            equal(result.priorityTier, 0)
-        end
-        records["c-alt"].snapshot.level = 25
-        equal(rank(account, records, settings)[1].priorityTier, 3)
-        records["a-main"].snapshot.level = 60
-        records["a-main"].restedState.logout.restedXp = 60000
-        for _, result in ipairs(rank(account, records, settings)) do
-            equal(result.priorityTier, 0)
-        end
-    end)
-
     test("ranking is deterministic, non-mutating and always provides two or three reasons", function()
         local account, records, settings = roster()
         account.roster["a-main"].isMain = false
@@ -323,8 +278,7 @@ return function(h)
         records["b-alt"].snapshot.sections.progression.observedAt = at - 49 * 3600
         local result = rank(account, records, settings, active)[1]
         equal(result.characterId, "a-main")
-        equal(result.confidence, "LOW")
-        contains(result.reasons, "uncertain level observations")
+        equal(result.confidence, "HIGH")
         records["a-main"].snapshot = nil
         local results = rank(account, records, settings)
         equal(#results, 3)
@@ -347,7 +301,11 @@ return function(h)
         equal(rank(account, records, settings)[1].score, 0)
         for _, level in ipairs({ 23, 24, 43, 44, 58, 59 }) do
             records["b-alt"].snapshot.level = level
-            equal(rank(account, records, settings)[1].score, 15)
+            local scores = {}
+            for _, result in ipairs(rank(account, records, settings)) do
+                scores[result.characterId] = result.score
+            end
+            equal(scores["b-alt"], 15)
         end
         records["b-alt"].snapshot.level = 45
         equal(rank(account, records, settings)[1].score, 0)
@@ -362,7 +320,7 @@ return function(h)
         account.session.previousCharacterId = "b-alt"
         local result = rank(account, records, settings)
         equal(result[1].characterId, "b-alt")
-        close(result[1].score, 3 + 15 - 10)
+        close(result[1].score, 15 - 10)
     end)
 
     test("only enabled registered members rank and unavailable pins are explicit", function()
@@ -374,7 +332,7 @@ return function(h)
         local results, err, _, warnings = RQ.PriorityEngine.Evaluate(account, records, settings, { now = at })
         equal(err, nil)
         equal(#results, 0)
-        contains(warnings, "Pinned character is not an enabled member")
+        equal(#warnings, 0)
     end)
 
     local function start(native, skipped)
@@ -386,7 +344,7 @@ return function(h)
         else
             h.emit("PLAYER_LOGIN")
         end
-        assert(RQ.Database.Register("link", "warrior"))
+        assert(RQ.Database.Register("add"))
         return frames
     end
 
@@ -399,7 +357,7 @@ return function(h)
         input.characters["Player-Test-1"].restedState = nil
         local migrated, character, err = RQ.Migrations.Prepare(input, RQCharDB)
         assert(migrated and character, err)
-        equal(migrated.schemaVersion, 5)
+        equal(migrated.schemaVersion, 19)
         assert(migrated.characters["Player-Test-1"].restedState.logout)
         equal(input.characters["Player-Test-1"].restedState, nil)
         migrated.characters["Player-Test-1"].restedState.logout = nil
@@ -420,7 +378,7 @@ return function(h)
                 db.settings.planning.capLevels = 0
             end,
             function(db)
-                db.settings.planning.maxAltLag = 0
+                db.settings.planning.maxLevel = 0
             end,
             function(db)
                 db.settings.planning.levelMilestones = { 45, 25 }
@@ -447,7 +405,7 @@ return function(h)
             equal(account, nil)
             equal(character, nil)
             assert(err)
-            equal(input.schemaVersion, 5)
+            equal(input.schemaVersion, 19)
         end
     end)
 
@@ -508,28 +466,28 @@ return function(h)
         equal(RQDB.session.currentCharacterId, "Player-Second")
     end)
 
-    test("pin resolver handles slots, full names, ambiguous names and ignores", function()
+    test("pin resolver handles GUIDs, full names, ambiguous names and ignores", function()
         start()
-        equal(RQ.Database.ResolveMember("warrior"), "Player-Test-1")
+        equal(RQ.Database.ResolveMember("Player-Test-1"), "Player-Test-1")
         equal(RQ.Database.ResolveMember("RENAMED"), "Player-Test-1")
-        equal(RQ.Database.ResolveMember("Renamed-TestRealm"), "Player-Test-1")
-        equal(RQ.Database.ResolveMember("Chop Suey"), "Player-Test-1")
+        equal(RQ.Database.ResolveMember("Renamed-TestRealm PVE"), "Player-Test-1")
+        equal(RQ.Database.ResolveMember("Chop Suey"), nil)
         local copy = RQ.Util.Copy(RQ.Database.Current())
         copy.identity.guid, copy.identity.realm = "Player-Other", "OtherRealm"
         copy.registration = "pending"
         RQDB.characters["Player-Other"] = copy
-        assert(RQ.Database.Register("add", nil, "Player-Other"))
+        assert(RQ.Database.Register("add", "Player-Other"))
         local id, err = RQ.Database.ResolveMember("Renamed")
         equal(id, nil)
         contains({ err }, "Ambiguous")
-        _G.SlashCmdList.ROSTERQUARTERMASTER("pin warrior")
-        equal(RQDB.settings.planning.pinnedCharacterId, "Player-Test-1")
+        _G.SlashCmdList.ROSTERQUARTERMASTER("main Player-Test-1")
+        equal(RQDB.roster["Player-Test-1"].isMain, true)
         _G.SlashCmdList.ROSTERQUARTERMASTER("unpin")
         equal(RQDB.settings.planning.pinnedCharacterId, nil)
-        assert(RQ.Database.Pin("Player-Other"))
-        assert(RQ.Database.Register("ignore", nil, "Player-Other"))
+        assert(RQ.Database.SetMain("Player-Other"))
+        assert(RQ.Database.Register("ignore", "Player-Other"))
         equal(RQDB.settings.planning.pinnedCharacterId, nil)
-        equal(RQ.Database.Pin("missing"), false)
+        equal(RQ.Database.SetMain("missing"), false)
     end)
 
     test("fallback promotion rekeys pin and both session references even without slots", function()
@@ -539,14 +497,13 @@ return function(h)
         h.emit("PLAYER_LOGIN")
         assert(RQ.Database.Register("add"))
         local old = RQ.Database.activeId
-        assert(RQ.Database.Pin(old))
+        assert(RQ.Database.SetMain(old))
         RQDB.session.previousCharacterId = old
-        RQDB.plannedRoster = {}
         _G.UnitGUID = function()
             return "Player-Promoted"
         end
         assert(RQ.SnapshotService.Refresh())
-        equal(RQDB.settings.planning.pinnedCharacterId, "Player-Promoted")
+        equal(RQDB.roster["Player-Promoted"].isMain, true)
         equal(RQDB.session.currentCharacterId, "Player-Promoted")
         equal(RQDB.session.previousCharacterId, "Player-Promoted")
         equal(RQDB.characters[old], nil)
@@ -558,12 +515,12 @@ return function(h)
         local state = RQ.Database.Current().restedState
         state.calibration.outside = { 0.02 }
         local settings = RQ.Util.Copy(RQDB.settings.planning)
-        settings.maxAltLag = 0
+        settings.maxLevel = 0
         equal(RQ.Database.SetPlanning(settings), false)
-        equal(RQDB.settings.planning.maxAltLag, 10)
-        settings.maxAltLag = 12
+        equal(RQDB.settings.planning.maxLevel, 60)
+        settings.maxLevel = 12
         assert(RQ.Database.SetPlanning(settings))
-        equal(#state.calibration.outside, 1)
+        equal(#state.calibration.outside, 0)
         settings.innRate = 0.02
         assert(RQ.Database.SetPlanning(settings))
         equal(#state.calibration.outside, 0)
@@ -577,26 +534,6 @@ return function(h)
         assert(RQ.Database.SetPlanningSignal("Player-Test-1", "resourceBlocker", true))
         equal(RQDB.roster["Player-Test-1"].resourceBlocker, true)
         equal(RQ.Database.SetPlanningSignal("Player-Test-1", "not-a-signal", true), false)
-    end)
-
-    test("Today native cards pin/unpin and text fallback works without Today module", function()
-        local frames = start(true)
-        frames.Click(frames.MinimapButton())
-        equal(RQ.MainWindow.tab, "today")
-        frames.Click(frames.FindButton("Pin next"))
-        h.flushTimers()
-        equal(RQDB.settings.planning.pinnedCharacterId, "Player-Test-1")
-        frames.Click(frames.FindButton("Unpin"))
-        h.flushTimers()
-        equal(RQDB.settings.planning.pinnedCharacterId, nil)
-        local report = RQ.PlanningService.Evaluate()
-        contains({ RQ.TodayPanel.Build(RQDB, report)[1].title }, "Play next")
-        RQ.TodayPanel = nil
-        _G.SlashCmdList.ROSTERQUARTERMASTER("today")
-        contains(h.messages(), "Today module did not load")
-        contains(h.messages(), "observed live")
-        _G.SlashCmdList.ROSTERQUARTERMASTER("today text")
-        contains(h.messages(), "Renamed [")
     end)
 
     test("Planning native form preserves focus, saves numeric units and controls manual signals", function()
@@ -618,9 +555,6 @@ return function(h)
         frames.Click(frames.FindButton("Dungeon ready: No"))
         h.flushTimers()
         equal(RQDB.roster["Player-Test-1"].dungeonReady, true)
-        frames.Click(frames.FindButton("Pin selected"))
-        h.flushTimers()
-        equal(RQDB.settings.planning.pinnedCharacterId, "Player-Test-1")
         frames.Click(frames.FindButton("Reset calibration"))
         h.flushTimers()
         equal(RQDB.roster["Player-Test-1"].restedRevision, 1)
@@ -733,9 +667,9 @@ return function(h)
         _G.SlashCmdList.ROSTERQUARTERMASTER("roster")
         local scroll = frames.FindKind("ScrollFrame")
         scroll:SetVerticalScroll(100)
-        frames.Click(frames.FindButton("Today"))
+        frames.Click(frames.FindButton("Suggested order"))
         equal(scroll:GetVerticalScroll(), 0)
-        frames.Click(frames.FindButton("Planning"))
+        frames.Click(frames.FindButton("Settings"))
         local edit = frames.FindKind("EditBox")
         edit:SetText("0.7")
         edit:SetFocus()

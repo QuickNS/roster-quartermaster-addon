@@ -243,6 +243,9 @@ return function(h)
         _G.GetZoneText = function()
             return "Capital"
         end
+        _G.GetProfessions = function()
+            return 7
+        end
         _G.GetProfessionInfo = function()
             return "Mining", 0, 125, 150, 0, 0, 186
         end

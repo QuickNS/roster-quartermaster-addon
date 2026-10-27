@@ -58,9 +58,9 @@ function Config.Prepare(value)
             return nil, "Invalid planning weight: " .. key
         end
     end
-    if settings.pinnedCharacterId ~= nil and not RQ.Util.IsText(settings.pinnedCharacterId) then
-        return nil, "Invalid pinned character ID."
-    end
+    settings.pinnedCharacterId = nil
+    settings.mainLeadLevels, settings.leadStartLevel, settings.maxAltLag = nil, nil, nil
+    settings.weights.pinned, settings.weights.mainLead, settings.weights.altLag = nil, nil, nil
     return settings
 end
 

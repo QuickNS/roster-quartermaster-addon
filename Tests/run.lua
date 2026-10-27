@@ -11,6 +11,7 @@ local apiNames = {
     "GetRealmName",
     "UnitClass",
     "UnitRace",
+    "UnitFactionGroup",
     "UnitLevel",
     "UnitXP",
     "UnitXPMax",
@@ -24,6 +25,20 @@ local apiNames = {
     "SlashCmdList",
     "SLASH_ROSTERQUARTERMASTER1",
     "GetMoney",
+    "GetStatisticsCategoryList",
+    "GetCategoryInfo",
+    "GetCategoryNumAchievements",
+    "GetAchievementInfo",
+    "GetStatistic",
+    "GetLocale",
+    "GetInventoryItemID",
+    "GetInventoryItemLink",
+    "GetItemStats",
+    "IsUsableItem",
+    "IsEquippableItem",
+    "C_PlayerInfo",
+    "TooltipDataProcessor",
+    "date",
     "GetZoneText",
     "GetSubZoneText",
     "NUM_BAG_SLOTS",
@@ -32,6 +47,32 @@ local apiNames = {
     "GetContainerNumFreeSlots",
     "C_Container",
     "C_Item",
+    "C_TooltipInfo",
+    "CONTAINER_SLOTS",
+    "NUM_SLOTS",
+    "LOCKED",
+    "ITEM_LOCKED",
+    "GetItemInfo",
+    "GetCursorInfo",
+    "GetCursorPosition",
+    "ClearCursor",
+    "GetSendMailItem",
+    "ClickSendMailItemButton",
+    "ATTACHMENTS_MAX_SEND",
+    "MailFrame",
+    "SendMailFrame",
+    "SendMailNameEditBox",
+    "MailFrameTab2",
+    "SendMail",
+    "hooksecurefunc",
+    "GetSendMailCOD",
+    "GetInboxHeaderInfo",
+    "GetInboxItem",
+    "GetInboxNumItems",
+    "ATTACHMENTS_MAX_RECEIVE",
+    "TakeInboxItem",
+    "ReturnInboxItem",
+    "C_Mail",
     "C_TradeSkillUI",
     "GetProfessions",
     "GetProfessionInfo",
@@ -42,7 +83,22 @@ local apiNames = {
     "GameTooltip",
     "UISpecialFrames",
     "RQMainWindow",
+    "RQMinimapButton",
     "RQCopyWindow",
+    "ContainerFrame1",
+    "ContainerFrame1Item1",
+    "ContainerFrame1Item2",
+    "ContainerFrameCombinedBags",
+    "CLASS_ICON_TCOORDS",
+    "RAID_CLASS_COLORS",
+    "LOCALIZED_CLASS_NAMES_MALE",
+    "SetPortraitTexture",
+    "GetCurrentKeyBoardFocus",
+    "C_Bank",
+    "Enum",
+    "Auctionator",
+    "RQGroceryWindow",
+    "RQStockEditor",
 }
 
 local function equal(actual, expected)
@@ -109,6 +165,7 @@ local function reset()
 end
 
 local function fakeCharacter()
+    _G.date = os.date
     _G.C_Timer = {
         After = function(_, callback)
             timers[#timers + 1] = callback
@@ -151,13 +208,16 @@ local function fakeCharacter()
         return "Renamed"
     end
     _G.GetRealmName = function()
-        return "TestRealm"
+        return "TestRealm PVE"
     end
     _G.UnitClass = function()
         return "Warrior", "WARRIOR", 1
     end
     _G.UnitRace = function()
         return "Orc", "Orc", 2
+    end
+    _G.UnitFactionGroup = function()
+        return "Horde", "Horde"
     end
     _G.UnitLevel = function()
         return 25
@@ -191,8 +251,8 @@ test("TOC load order, scoped initialization, login and logout", function()
     emit("ADDON_LOADED", "UnrelatedAddon")
     equal(RQDB, nil)
     emit("ADDON_LOADED", "RosterQuartermaster")
-    equal(RQDB.schemaVersion, 5)
-    equal(RQCharDB.schemaVersion, 5)
+    equal(RQDB.schemaVersion, 19)
+    equal(RQCharDB.schemaVersion, 19)
     emit("PLAYER_LOGIN")
     equal(RQCharDB.identity.guid, "Player-Test-1")
     equal(RQCharDB.identity.class, "WARRIOR")
@@ -215,7 +275,7 @@ test("diagnostics include observed build, snapshot and capability output", funct
     contains(messages, "GUID: Player-Test-1")
     contains(messages, "Level: 25; XP: 12000/40000")
     contains(messages, "Rested XP (observed): 20000; resting: false")
-    contains(messages, "Schemas: account=5; character=5")
+    contains(messages, "Schemas: account=19; character=19")
     contains(messages, "Last saved observation (server timestamp): 123456789")
 end)
 
@@ -448,6 +508,21 @@ assert(loadfile("Tests/RegistrationTests.lua"))()(helpers)
 assert(loadfile("Tests/DashboardTests.lua"))()(helpers)
 assert(loadfile("Tests/PlanningTests.lua"))()(helpers)
 assert(loadfile("Tests/SuppliesTests.lua"))()(helpers)
+assert(loadfile("Tests/MailTests.lua"))()(helpers)
+assert(loadfile("Tests/BagPlannerTests.lua"))()(helpers)
+assert(loadfile("Tests/RosterFoundationTests.lua"))()(helpers)
+assert(loadfile("Tests/GraphicalTests.lua"))()(helpers)
+assert(loadfile("Tests/InventorySearchTests.lua"))()(helpers)
+assert(loadfile("Tests/BankTests.lua"))()(helpers)
+assert(loadfile("Tests/ShipmentTests.lua"))()(helpers)
+assert(loadfile("Tests/ProfessionAdviceTests.lua"))()(helpers)
+assert(loadfile("Tests/FinishingTests.lua"))()(helpers)
+assert(loadfile("Tests/WorkspaceTests.lua"))()(helpers)
+assert(loadfile("Tests/LogisticsPolicyTests.lua"))()(helpers)
+assert(loadfile("Tests/ConfigTransferTests.lua"))()(helpers)
+assert(loadfile("Tests/TradeGroupTests.lua"))()(helpers)
+assert(loadfile("Tests/MinimapTests.lua"))()(helpers)
+assert(loadfile("Tests/RevampTests.lua"))()(helpers)
 
 local failed = 0
 for _, item in ipairs(tests) do

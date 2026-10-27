@@ -9,5 +9,5 @@
       "extensions": ["sumneko.lua", "JohnnyMorganz.stylua", "ms-python.python"]
     }
   },
-  "postCreateCommand": "lua5.1 Tests/run.lua"
+  "postCreateCommand": "python3 -B -m unittest discover -s Tests -p 'test_package.py' && lua5.1 Tests/run.lua"
 }

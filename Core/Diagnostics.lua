@@ -17,26 +17,6 @@ function Diagnostics.Capture()
     return api.GetCharacterIdentity(), snapshot
 end
 
-function Diagnostics.Slots()
-    if not RQ.Database.initialized then
-        RQ.Api.Print("Roster unavailable: " .. RQ.Database.status)
-        return
-    end
-    for _, id in ipairs(RQ.Util.Keys(RQDB.plannedRoster)) do
-        local slot = RQDB.plannedRoster[id]
-        RQ.Api.Print(
-            id
-                .. ": "
-                .. display(slot.plannedName)
-                .. " ["
-                .. display(slot.class)
-                .. "] - "
-                .. (slot.claimedBy and "linked to " .. slot.claimedBy or "available")
-        )
-    end
-    RQ.Api.Print("Use /rq link <slot> for this character, or /rq name <slot> <planned name> to edit a label.")
-end
-
 function Diagnostics.Roster(silent, includeIgnored)
     local lines = {}
     local function output(text)
@@ -76,6 +56,11 @@ function Diagnostics.Roster(silent, includeIgnored)
                     .. "; last seen: "
                     .. display(snapshot.lastSeen)
             )
+            output("Trade group: " .. RQ.Character.TradeGroupLabel(record.identity))
+            local cook = RQ.LogisticsPolicies.Cook(RQDB, record.identity)
+            if cook then
+                output("Cooking/Fishing: " .. display(RQ.Character.DisplayName(RQDB.characters[cook].identity)))
+            end
             output(
                 "  ID: "
                     .. id
@@ -124,6 +109,18 @@ function Diagnostics.Roster(silent, includeIgnored)
             if planning then
                 output("  " .. RQ.RestedEstimator.Describe(planning.estimates[id]))
             end
+            for _, line in
+                ipairs(
+                    RQ.ProfessionStatus.Lines(
+                        snapshot,
+                        now,
+                        RQDB.policies.staleSnapshotHours,
+                        RQDB.settings.professionLag
+                    )
+                )
+            do
+                output("  " .. line)
+            end
             for _, section in ipairs(RQ.Util.Keys(RQ.Snapshot.fields)) do
                 local state = snapshot.sections[section]
                 if
@@ -167,6 +164,9 @@ function Diagnostics.Report(silent)
         "GUID: " .. display(identity.guid),
         "Character: " .. display(RQ.Character.DisplayName(identity)) .. "; realm: " .. display(identity.realm),
         "Class: " .. display(identity.class) .. "; race: " .. display(identity.race),
+        "Trade group: " .. RQ.Character.TradeGroupLabel(identity) .. "; ruleset source: " .. display(
+            identity.rulesetSource
+        ),
         "Level: " .. display(snapshot.level) .. "; XP: " .. display(snapshot.xp) .. "/" .. display(snapshot.xpMax),
         "Rested XP (observed): " .. display(snapshot.restedXp) .. "; resting: " .. display(snapshot.wasResting),
         "SavedVariables: " .. database.message,
@@ -182,10 +182,30 @@ function Diagnostics.Report(silent)
     }
     local record = RQ.Database.Current()
     if record then
+        lines[#lines + 1] = "Profession advice: reference model v"
+            .. RQ.ProfessionRelationships.version
+            .. "; focus: "
+            .. record.professionIntent.focus
+        lines[#lines + 1] = "Planned profession IDs (not learned): "
+            .. table.concat(RQ.Util.Keys(record.professionIntent.planned), ",")
+        lines[#lines + 1] = "Preferred profession IDs: "
+            .. table.concat(RQ.Util.Keys(record.professionIntent.preferred), ",")
+            .. "; excluded new choices: "
+            .. table.concat(RQ.Util.Keys(record.professionIntent.excluded), ",")
+        lines[#lines + 1] = "Mail tracking: "
+            .. (RQ.MailService.Verified() and "verified build" or "observation mode")
+            .. "; shipments: "
+            .. #RQ.Util.Keys(RQDB.mailTracking.transfers)
+        lines[#lines + 1] = "Inbox/carried coherence: "
+            .. tostring(record.inventory.mail.coherent)
+            .. "; attempted: "
+            .. display(record.inventory.mail.attemptedAt)
+        if record.inventory.mail.error then
+            lines[#lines + 1] = "Inbox scan: " .. record.inventory.mail.error
+        end
         local calibration = record.restedState.calibration
         local comparison = record.restedState.comparison
         lines[#lines + 1] = "Rested assumptions: unverified; configure rates/cap in /rq planning"
-        lines[#lines + 1] = "Pinned character: " .. display(RQDB.settings.planning.pinnedCharacterId)
         lines[#lines + 1] = "Calibration samples: inn=" .. #calibration.inside .. "; outside=" .. #calibration.outside
         lines[#lines + 1] = "Last calibration: " .. display(comparison and comparison.reason)
         if comparison then
@@ -246,6 +266,20 @@ function Diagnostics.Report(silent)
             .. display(record.recipes.scannedAt)
         if record.inventory.bags.error then
             lines[#lines + 1] = "Bag scan: " .. record.inventory.bags.error
+        end
+        local bank = record.inventory.bank
+        lines[#lines + 1] = "Bank/carried coherence: "
+            .. tostring(bank.coherent)
+            .. "; last bank attempt: "
+            .. display(bank.attemptedAt)
+        if bank.error then
+            lines[#lines + 1] = "Bank scan: " .. bank.error
+        end
+        for _, id in ipairs(RQ.Util.Keys(bank.containers or {})) do
+            lines[#lines + 1] = "Bank container " .. id .. ": " .. bank.containers[id].capacity .. " slots"
+        end
+        for _, id in ipairs(RQ.Util.Keys(bank.items)) do
+            lines[#lines + 1] = "Bank item " .. id .. ": " .. bank.items[id]
         end
         if record.recipes.error then
             lines[#lines + 1] = "Recipe scan: " .. record.recipes.error

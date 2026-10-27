@@ -1,0 +1,28 @@
+name: Validate addon and packaging
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build existing development toolchain
+        run: docker build -t rq-dev -f .devcontainer/Dockerfile .
+      - name: Package tests, Lua tests, lint, formatting and syntax
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace rq-dev bash -c '
+            set -e
+            python3 -B -m unittest discover -s Tests -p "test_*.py"
+            lua5.1 Tests/run.lua
+            luacheck Core Data Models Services UI Bootstrap.lua Tests
+            stylua --check Core Data Models Services UI Bootstrap.lua Tests
+            find Core Data Models Services UI Tests -name "*.lua" -exec luac5.1 -p {} +
+            luac5.1 -p Bootstrap.lua
+          '
+          git diff --check

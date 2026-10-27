@@ -1,0 +1,60 @@
+name: Package addon release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build development toolchain
+        run: docker build -t rq-dev -f .devcontainer/Dockerfile .
+      - name: Validate and package
+        env:
+          RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          docker run --rm -e RELEASE_TAG -v "$PWD:/workspace" -w /workspace rq-dev bash -c '
+            set -e
+            python3 -B -m unittest discover -s Tests -p "test_*.py"
+            lua5.1 Tests/run.lua
+            luacheck Core Data Models Services UI Bootstrap.lua Tests --quiet
+            stylua --check Core Data Models Services UI Bootstrap.lua Tests
+            find Core Data Models Services UI Tests -name "*.lua" -exec luac5.1 -p {} +
+            luac5.1 -p Bootstrap.lua
+            if [ -n "$RELEASE_TAG" ]; then
+              python3 -B Tools/package.py --output dist/RosterQuartermaster.zip --tag "$RELEASE_TAG"
+            else
+              python3 -B Tools/package.py --output dist/RosterQuartermaster.zip
+            fi
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RosterQuartermaster
+          path: dist/RosterQuartermaster.zip
+          if-no-files-found: error
+  publish:
+    if: github.ref_type == 'tag'
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: RosterQuartermaster
+          path: dist
+      - name: Attach ZIP to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --verify-tag --generate-notes
+          gh release upload "$RELEASE_TAG" dist/RosterQuartermaster.zip --clobber

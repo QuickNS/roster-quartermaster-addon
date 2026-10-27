@@ -13,14 +13,7 @@ local function nextMilestone(value, milestones, distance)
 end
 
 local function sectionFresh(snapshot, name, now, hours)
-    local section = snapshot.sections and snapshot.sections[name]
-    return section
-        and section.complete
-        and RQ.Util.IsNumber(section.observedAt)
-        and section.observedAt > 0
-        and RQ.Util.IsNumber(now)
-        and now >= section.observedAt
-        and now - section.observedAt < hours * 3600
+    return RQ.Snapshot.SectionState(snapshot, name, now, hours) == "RECENT"
 end
 
 function Engine.Evaluate(account, records, settings, context)
@@ -29,52 +22,21 @@ function Engine.Evaluate(account, records, settings, context)
         return nil, err
     end
     settings, context = validated, context or {}
-    local candidates, mainIds, warnings = {}, {}, {}
-    local lowest, unknownLevel, uncertainRoster = math.huge, false, false
+    local candidates, warnings = {}, {}
     for _, id in ipairs(RQ.Util.Keys(account.roster)) do
         local entry, record = account.roster[id], records[id]
-        if entry.enabled == true and record and record.registration == "member" then
+        if entry.enabled and record and record.registration == "member" then
             local snapshot = record.snapshot or {}
-            local level = snapshot.level
-            if not RQ.Util.IsNumber(level) then
-                level, unknownLevel = nil, true
-            end
-            if level then
-                lowest = math.min(lowest, level)
-            end
-            uncertainRoster = uncertainRoster
-                or not sectionFresh(snapshot, "progression", context.now, account.policies.staleSnapshotHours)
-            candidates[#candidates + 1] =
-                { id = id, entry = entry, record = record, level = level, snapshot = snapshot }
-            if entry.isMain then
-                mainIds[#mainIds + 1] = id
-            end
+            candidates[#candidates + 1] = {
+                id = id,
+                entry = entry,
+                record = record,
+                snapshot = snapshot,
+                level = RQ.Util.IsNumber(snapshot.level) and snapshot.level or nil,
+            }
         end
     end
-    local mainId = #mainIds == 1 and mainIds[1] or nil
-    local mainLevel = mainId and records[mainId].snapshot and records[mainId].snapshot.level
-    if not RQ.Util.IsNumber(mainLevel) then
-        mainLevel = nil
-    end
-    if #mainIds == 0 then
-        warnings[#warnings + 1] = "No main configured; main-lead rule is inactive"
-    end
-    if #mainIds > 1 then
-        warnings[#warnings + 1] = "Multiple mains configured; choose one before using the lead rule"
-    end
-    local leadActive = #candidates > 1
-        and not unknownLevel
-        and lowest >= settings.leadStartLevel
-        and mainLevel
-        and mainLevel < settings.maxLevel
-    local highestAlt = 0
-    for _, candidate in ipairs(candidates) do
-        if candidate.id ~= mainId and candidate.level then
-            highestAlt = math.max(highestAlt, candidate.level)
-        end
-    end
-    local needsLead = leadActive and mainLevel < math.min(settings.maxLevel, highestAlt + settings.mainLeadLevels)
-    local results, estimates, pinFound = {}, {}, false
+    local results, estimates = {}, {}
     for _, candidate in ipairs(candidates) do
         local id, entry, record, level = candidate.id, candidate.entry, candidate.record, candidate.level
         local live = context.live or {}
@@ -91,29 +53,16 @@ function Engine.Evaluate(account, records, settings, context)
             score = score + amount
             factors[#factors + 1] = { amount = amount, reason = reason, order = #factors + 1 }
         end
-        local pinned = settings.pinnedCharacterId == id
-        pinFound = pinFound or pinned
         local capEligible = level and level < settings.maxLevel
         local nearCap = capEligible and estimate.capRatio and estimate.capRatio >= settings.nearCapRatio
-        local lead = needsLead and id == mainId
         local blocker = entry.resourceBlocker == true
-        local tier = pinned and 5 or nearCap and 4 or lead and 3 or blocker and 2 or 0
+        local tier = nearCap and 4 or blocker and 2 or 0
         local firstReason
-        if pinned then
-            add(settings.weights.pinned, "Manually pinned; this overrides automatic rotation")
-            firstReason = factors[#factors].reason
-        end
         if capEligible and estimate.capRatio then
             local source = estimate.isEstimated and "Estimated" or "Observed"
             local description = nearCap and " rested XP is near the configured cap" or " rested XP is available"
             add(settings.weights.rested * estimate.capRatio, source .. description)
-            if nearCap and not firstReason then
-                firstReason = factors[#factors].reason
-            end
-        end
-        if lead then
-            add(settings.weights.mainLead, "Main is below the configured " .. settings.mainLeadLevels .. "-level lead")
-            if not firstReason then
+            if nearCap then
                 firstReason = factors[#factors].reason
             end
         end
@@ -122,12 +71,6 @@ function Engine.Evaluate(account, records, settings, context)
             if not firstReason then
                 firstReason = factors[#factors].reason
             end
-        end
-        if level and mainLevel and id ~= mainId and mainLevel - level > settings.maxAltLag then
-            add(
-                settings.weights.altLag * math.min(1, (mainLevel - level - settings.maxAltLag) / settings.maxAltLag),
-                "Character is " .. (mainLevel - level) .. " levels behind the main"
-            )
         end
         local milestone = nextMilestone(level, settings.levelMilestones, 2)
         if milestone and level < settings.maxLevel then
@@ -147,11 +90,31 @@ function Engine.Evaluate(account, records, settings, context)
         if account.session and account.session.previousCharacterId == id then
             add(settings.weights.lastSession, "Played in the previous character session")
         end
+        local professionSettings = account.settings and account.settings.professionLag
+        if professionSettings and professionSettings.rankingEnabled then
+            local status = RQ.ProfessionStatus.Evaluate(
+                candidate.snapshot,
+                context.now,
+                account.policies.staleSnapshotHours,
+                professionSettings
+            )
+            local deficit = 0
+            for _, profession in ipairs(status.professions) do
+                if profession.kind == "primary" and profession.state == "BEHIND" and profession.benchmark > 0 then
+                    deficit = math.max(deficit, profession.deficit / profession.benchmark)
+                end
+            end
+            if deficit > 0 then
+                add(
+                    professionSettings.rankingWeight * deficit,
+                    "Opt-in profession lag contribution against the configured 5 x level benchmark"
+                )
+            end
+        end
         local freshness = RQ.Snapshot.Freshness(candidate.snapshot, context.now, account.policies.staleSnapshotHours)
         local uncertain = freshness ~= "RECENT"
             or not level
             or not sectionFresh(candidate.snapshot, "progression", context.now, account.policies.staleSnapshotHours)
-            or (uncertainRoster and (lead or (mainLevel and level and mainLevel - level > settings.maxAltLag)))
         if uncertain then
             add(settings.weights.stale, "Snapshot is stale, incomplete, or has an uncertain timestamp")
         end
@@ -192,7 +155,10 @@ function Engine.Evaluate(account, records, settings, context)
         end
         reason(warning)
         if #reasons < 2 then
-            reason("Ties use a stable character-ID order; no random rotation")
+            reason(
+                "Lowest level first; Main wins equal-level ties within its realm/faction."
+                    .. " Other ties use signals then character ID"
+            )
         end
         results[#results + 1] = {
             characterId = id,
@@ -203,10 +169,23 @@ function Engine.Evaluate(account, records, settings, context)
             estimate = estimate,
         }
     end
-    if settings.pinnedCharacterId and not pinFound then
-        warnings[#warnings + 1] = "Pinned character is not an enabled member; select a new pin"
-    end
     table.sort(results, function(a, b)
+        local first, second = records[a.characterId], records[b.characterId]
+        local leftGroup = RQ.Character.RosterGroupKey(first.identity)
+        local rightGroup = RQ.Character.RosterGroupKey(second.identity)
+        if leftGroup ~= rightGroup then
+            return leftGroup < rightGroup
+        end
+        local leftLevel = first.snapshot and first.snapshot.level or math.huge
+        local rightLevel = second.snapshot and second.snapshot.level or math.huge
+        if leftLevel ~= rightLevel then
+            return leftLevel < rightLevel
+        end
+        local leftMain, rightMain =
+            account.roster[a.characterId].isMain == true, account.roster[b.characterId].isMain == true
+        if leftMain ~= rightMain then
+            return leftMain
+        end
         if a.priorityTier ~= b.priorityTier then
             return a.priorityTier > b.priorityTier
         end

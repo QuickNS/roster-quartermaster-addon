@@ -11,6 +11,27 @@ local function tableField(parent, key, path, default)
 end
 
 local function validateIdentity(identity)
+    if
+        identity.faction ~= nil
+        and identity.faction ~= "Alliance"
+        and identity.faction ~= "Horde"
+        and identity.faction ~= "Neutral"
+    then
+        return false
+    end
+    if identity.ruleset ~= nil and identity.ruleset ~= "PVE" and identity.ruleset ~= "PVP" then
+        return false
+    end
+    if
+        identity.rulesetSource ~= nil
+        and identity.rulesetSource ~= "manual"
+        and identity.rulesetSource ~= "realm-name"
+    then
+        return false
+    end
+    if identity.nameComplete ~= nil and type(identity.nameComplete) ~= "boolean" then
+        return false
+    end
     for _, field in ipairs({ "guid", "displayName", "fullName", "realm", "class", "race" }) do
         if identity[field] ~= nil and not RQ.Util.IsText(identity[field]) then
             return false
@@ -64,7 +85,8 @@ local function validateSnapshot(snapshot)
             return false
         end
         if
-            not RQ.Util.IsText(profession.name)
+            (profession.kind ~= nil and profession.kind ~= "primary" and profession.kind ~= "secondary")
+            or not RQ.Util.IsText(profession.name)
             or not RQ.Util.IsNumber(profession.skill)
             or not RQ.Util.IsNumber(profession.maxSkill)
         then
@@ -74,7 +96,7 @@ local function validateSnapshot(snapshot)
     return true
 end
 
-local function prepareRecord(record, path)
+local function prepareRecord(record, path, schema)
     local identity, err = tableField(record, "identity", path)
     if not identity then
         return nil, err
@@ -97,6 +119,12 @@ local function prepareRecord(record, path)
         entry, err = tableField(inventory, source, path .. ".inventory", RQ.Snapshot.EmptySource())
         if not entry then
             return nil, err
+        end
+        if (schema or 1) < 9 and source == "bank" then
+            entry.coherent = false
+        end
+        if (schema or 1) < 10 and source == "mail" then
+            entry.coherent = false
         end
         if entry.scannedAt == nil then
             entry.scannedAt = 0
@@ -135,6 +163,7 @@ local function prepareRecord(record, path)
         return nil, path .. ": " .. restedError .. " Original data preserved."
     end
     record.restedState = restedState
+    record.activity = nil
     local suppliesOk, suppliesError = RQ.SuppliesConfig.Prepare(record)
     if not suppliesOk then
         return nil, path .. ": " .. suppliesError .. " Original data preserved."
@@ -154,6 +183,20 @@ local function root(value, label)
         and value.schemaVersion ~= 3
         and value.schemaVersion ~= 4
         and value.schemaVersion ~= 5
+        and value.schemaVersion ~= 6
+        and value.schemaVersion ~= 7
+        and value.schemaVersion ~= 8
+        and value.schemaVersion ~= 9
+        and value.schemaVersion ~= 10
+        and value.schemaVersion ~= 11
+        and value.schemaVersion ~= 12
+        and value.schemaVersion ~= 13
+        and value.schemaVersion ~= 14
+        and value.schemaVersion ~= 15
+        and value.schemaVersion ~= 16
+        and value.schemaVersion ~= 17
+        and value.schemaVersion ~= 18
+        and value.schemaVersion ~= 19
     then
         return nil, label .. " has an unsupported schema; original data preserved."
     end
@@ -171,6 +214,14 @@ function Migrations.Prepare(accountValue, characterValue)
         return nil, nil, err
     end
     local seedLegacy = (account.schemaVersion or 1) < 4
+    local mail, mailError = RQ.MailConfig.Prepare(account.mailTracking)
+    if not mail then
+        return nil, nil, mailError
+    end
+    account.mailTracking = mail
+    account.checklists = nil
+    account.progress, account.plannedRoster = nil, nil
+    character.progress, character.plannedRoster = nil, nil
     for _, field in ipairs({ "settings", "roster", "characters", "policies", "session" }) do
         local value
         value, err = tableField(account, field, "RQDB")
@@ -183,6 +234,17 @@ function Migrations.Prepare(accountValue, characterValue)
         return nil, nil, planningError .. " Original data preserved."
     end
     account.settings.planning = planning
+    local professionLag, professionError = RQ.ProfessionConfig.Prepare(account.settings.professionLag)
+    if not professionLag then
+        return nil, nil, professionError .. " Original data preserved."
+    end
+    account.settings.professionLag = professionLag
+    local logistics, logisticsError = RQ.LogisticsPolicies.Prepare(account.settings.logistics)
+    if not logistics then
+        return nil, nil, logisticsError .. " Original data preserved."
+    end
+    account.settings.logistics = logistics
+    account.settings.gear = nil
     for _, field in ipairs({ "currentCharacterId", "previousCharacterId" }) do
         if account.session[field] ~= nil and not RQ.Util.IsText(account.session[field]) then
             return nil, nil, "Invalid session character ID; original data preserved."
@@ -201,10 +263,11 @@ function Migrations.Prepare(accountValue, characterValue)
     if not RQ.Util.IsWindowPosition(window) then
         return nil, nil, "RQDB.settings.window is invalid; original data preserved."
     end
-    local slots
-    slots, err = tableField(account, "plannedRoster", "RQDB", RQ.DefaultRoster)
-    if not slots then
-        return nil, nil, err
+    if account.settings.minimapAngle == nil then
+        account.settings.minimapAngle = 225
+    end
+    if not RQ.Util.IsMinimapAngle(account.settings.minimapAngle) then
+        return nil, nil, "RQDB.settings.minimapAngle is invalid; original data preserved."
     end
     if account.policies.staleSnapshotHours == nil then
         account.policies.staleSnapshotHours = 48
@@ -212,25 +275,22 @@ function Migrations.Prepare(accountValue, characterValue)
     if not RQ.Util.IsNumber(account.policies.staleSnapshotHours) then
         return nil, nil, "RQDB.policies.staleSnapshotHours is invalid; original data preserved."
     end
-    for _, entries in ipairs({ slots, account.roster }) do
-        for id, entry in pairs(entries) do
-            if not RQ.Util.IsText(id) or type(entry) ~= "table" or not validateIdentity(entry) then
-                return nil, nil, "RQDB contains an invalid roster entry; original data preserved."
-            end
-            for _, field in ipairs({ "plannedName", "claimedBy", "slotId", "role" }) do
-                if entry[field] ~= nil and not RQ.Util.IsText(entry[field]) then
-                    return nil, nil, "RQDB contains invalid roster metadata; original data preserved."
-                end
-            end
-            for _, field in ipairs({ "enabled", "isMain" }) do
-                if entry[field] ~= nil and type(entry[field]) ~= "boolean" then
-                    return nil, nil, "RQDB contains invalid roster flags; original data preserved."
-                end
+    for id, entry in pairs(account.roster) do
+        if not RQ.Util.IsText(id) or type(entry) ~= "table" or not validateIdentity(entry) then
+            return nil, nil, "RQDB contains an invalid roster entry; original data preserved."
+        end
+        entry.plannedName, entry.claimedBy, entry.slotId = nil, nil, nil
+        if entry.role ~= nil and not RQ.Util.IsText(entry.role) then
+            return nil, nil, "RQDB contains invalid roster metadata; original data preserved."
+        end
+        for _, field in ipairs({ "enabled", "isMain" }) do
+            if entry[field] ~= nil and type(entry[field]) ~= "boolean" then
+                return nil, nil, "RQDB contains invalid roster flags; original data preserved."
             end
         end
     end
     local prepared
-    prepared, err = prepareRecord(character, "RQCharDB")
+    prepared, err = prepareRecord(character, "RQCharDB", character.schemaVersion)
     if not prepared then
         return nil, nil, err
     end
@@ -269,7 +329,7 @@ function Migrations.Prepare(accountValue, characterValue)
         if not RQ.Util.IsText(id) or type(record) ~= "table" then
             return nil, nil, "RQDB.characters contains an invalid record; original data preserved."
         end
-        prepared, err = prepareRecord(record, "RQDB.characters." .. id)
+        prepared, err = prepareRecord(record, "RQDB.characters." .. id, account.schemaVersion)
         if not prepared then
             return nil, nil, err
         end
@@ -295,14 +355,15 @@ function Migrations.Prepare(accountValue, characterValue)
         character.restedState.logout =
             RQ.RestedEstimator.LogoutSample(character.snapshot, planning, id and account.roster[id])
     end
-    for id, slot in pairs(slots) do
-        if slot.claimedBy and (not account.roster[slot.claimedBy] or account.roster[slot.claimedBy].slotId ~= id) then
-            return nil, nil, "RQDB contains an inconsistent provisional link; original data preserved."
-        end
-    end
+    local mains = {}
     for id, entry in pairs(account.roster) do
-        if entry.slotId and (not slots[entry.slotId] or slots[entry.slotId].claimedBy ~= id) then
-            return nil, nil, "RQDB contains an inconsistent roster link; original data preserved."
+        local record = account.characters[id]
+        if entry.isMain and entry.enabled and record and record.registration == "member" then
+            local key = RQ.Character.RosterGroupKey(record.identity)
+            if mains[key] then
+                return nil, nil, "Multiple Main characters in one realm/faction; original data preserved."
+            end
+            mains[key] = id
         end
     end
     -- Validate both copies before publishing either SavedVariables root.

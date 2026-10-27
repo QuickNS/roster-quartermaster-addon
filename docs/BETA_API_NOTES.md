@@ -1,240 +1,248 @@
 # Forever beta API notes
 
-## Evidence status
+## Evidence status for 0.0.38
 
-On 2026-10-02, the user reported this in-client `GetBuildInfo()` output:
+`0.0.38` uses schema 19. The minimap launcher uses standard native tracking
+border/highlight textures and optional `CreateMaskTexture`/`AddMaskTexture`.
+If masking fails or is absent, a round native border remains.
 
-```text
-1.60.1 70170 Oct 1 2026 16001
-```
+Dragging reads `GetCursorPosition`, `Minimap:GetEffectiveScale`, `GetCenter`,
+`GetWidth` and `GetHeight` inside the adapter. Finite geometry is required;
+unavailable reads stop the drag and report an error without replacing the last
+saved position. Cursor coordinates are divided by the minimap's effective scale.
+The angle is saved after release/hide/combat/logout, not continuously on idle.
+Collectors retain ownership after reparenting or reanchoring the button.
+Actual Forever texture rendering and mouse-event ordering still need validation.
+Capability detection, passing mocks and older user reports are not certification
+of this candidate or every API contract. Record exact client version, build,
+interface, locale and event/API observations when testing.
 
-This identifies client version **1.60.1**, build **70170**, build date
-**Oct 1 2026**, and interface **16001**. The TOC now declares that observed
-interface number.
+Earlier evidence, retained only as context:
 
-Later on 2026-10-02, the user reported: **"everything passed. diag looks fine"**
-after receiving the installation, diagnostics/rescan, `/reload`, and full-restart
-persistence walkthrough for version 0.0.1. Those smoke tests are recorded as
-user-reported passes on the build above, not as independently observed results.
-The new version 0.0.2 APIs, migration, registration UI, and event updates have
-only been tested with mocks so far.
-
-During 0.0.2 testing on 2026-10-02, the user reported `/rq link warrior`
-remaining in the chat input, with `Bootstrap.lua:74: attempt to index field
-'RegistrationPrompt' (a nil value)`. The user then confirmed that the `UI`
-directory had been omitted from the installation. Omitting the module in the test loader
-reproduced the same exception. Version 0.0.3 removes the slash-command dependency
-on that module and reports its absence. In-client confirmation is pending.
-
-Version 0.0.4 adds the roster dashboard and requested native minimap launcher.
-Its UI, geometry, schema-3 upgrade, and configuration interactions have been
-tested with mocked frames only; visual compatibility in Forever remains pending.
-
-Version 0.0.5 adds Today/Planning tabs, schema-4 state, offline rested estimates and
-login calibration. All new behavior has automated mock coverage only. The initial
-inn/outside rates (0.625%/0.15625% of a level per hour), 150% rested cap, maximum
-level 60, and multiplier semantics are **provisional assumptions**, not verified
-Forever contracts. They are editable. There is no assumed Legacy perk API:
-perk changes require a manual multiplier update or calibration reset.
-Positive uncapped accumulation with unchanged level/XP/XPMax can calibrate rates,
-but cannot establish a true cap or prove perk semantics. Test those independently.
-
-No diagnostic transcript or separate per-test results were supplied. Individual
-API return values, event delivery details, and extended failure cases remain
-unconfirmed. No direct client access was available during implementation.
-Mock results must not be recorded as in-client observations.
-
-During 0.0.5 testing, the user supplied a roster screenshot showing the active
-level-21 character with valid XP/money/bags/professions and an offline level-20
-character with `0/0` XP, zero money/bags, no professions, and a missing rested
-baseline. The offline `lastSeen` and `lastLogout` timestamps matched. This is
-consistent with the final scan reading cleared client state, but no API/event
-trace was supplied. Simulating those logout API returns reproduced the overwrite.
-Version 0.0.6 preserves the earlier snapshot when logout progression is unusable,
-and labels fallback estimates as cached and LOW confidence. Live confirmation is
-pending; existing overwritten data must be recaptured on the affected character.
-
-### 0.0.6 API reference basis and remaining verification
-
-The user confirmed that Forever characters have first and last names. The adapter
-now prefers the unmodified player name and exposes all candidate name API returns
-in `/rq copy`. Its realm return is never assumed to be a surname. An explicit
-`/rq fullname` override is available until the exact name behavior is confirmed.
-
-The public [Forever addon kit API snapshot](https://github.com/Thunderz96/forever-addon-kit/blob/main/data/forever_api.json)
-lists `UnitNameUnmodified`, `C_Container.GetContainerItemInfo`, and the recipe APIs.
-The community [Forever type declarations](https://github.com/Atraeau/WoW-Addons/blob/main/types/WowForeverAPI.lua)
-document container stack count, item ID, binding and lock fields, and the recipe
-schematic API. These are reference evidence, not a transcript from the user's
-build. No third-party addon implementation was incorporated.
-
-New read paths to verify in client:
-
-- `UnitNameUnmodified("player")`; compare it with `UnitName` and `UnitFullName`.
-- `C_Container.GetContainerNumSlots/GetContainerItemInfo` and `C_Item.GetItemInfoInstant`.
-- `C_TradeSkillUI.IsTradeSkillReady/IsTradeSkillLinked/IsTradeSkillGuild/IsTradeSkillGuildMember`.
-- `GetBaseProfessionInfo/GetAllRecipeIDs/GetRecipeInfo/GetRecipeSourceText/GetRecipeSchematic`
-  in the `C_TradeSkillUI` namespace.
-- `TRADE_SKILL_SHOW`, `TRADE_SKILL_LIST_UPDATE`, `TRADE_SKILL_CLOSE`, `MAIL_SHOW`.
-- Multiline native EditBox selection and Ctrl+C through the copy window.
-
-Missing/invalid recipe data retains prior observations with an error. Unsupported
-reagent alternatives are not resolved automatically. Binding must explicitly be
-false and locking explicitly false before a stack is allocatable. Recipient,
-realm/faction and mail rules still require manual confirmation.
-
-The compatibility probe tests conventional WoW API names with capability checks;
-it does not assert that Forever exposes these APIs unchanged. Calls that throw
-are contained at the adapter boundary and reported by `/rq diag`. Restricted
-return values are rejected when `issecretvalue` is available.
-
-## Candidate APIs to verify
-
-The overall diagnostic smoke test passed according to the user. `Unverified`
-below means the specific API contract or output has not been supplied or
-individually confirmed; it does not mean the smoke test failed.
-
-| API / global | Candidate shape or use | Status |
-| --- | --- | --- |
-| `GetBuildInfo()` | version, build, date, interface number | User-reported output confirmed on 2026-10-02; see above |
-| `WOW_PROJECT_ID` | Numeric project ID; not proof of Forever flavour | Unverified |
-| `UnitGUID("player")` | Character GUID string | Unverified |
-| `UnitName("player")` | Display name as first return value | Unverified |
-| `GetRealmName()` | Realm string | Unverified |
-| `UnitClass("player")` | Class token as second return value | Unverified |
-| `UnitRace("player")` | Localized race label as first return value | Unverified |
-| `UnitLevel("player")` | Non-negative level number | Unverified |
-| `UnitXP("player")` / `UnitXPMax("player")` | Current and maximum XP | Unverified |
-| `GetXPExhaustion()` | Rested XP; successful nil provisionally means zero | Unverified |
-| `IsResting()` | Boolean resting state; other types rejected | Unverified |
-| `GetServerTime()` | Non-negative timestamp, assumed seconds | Unverified |
-| `issecretvalue(value)` | Restricted-value detection when present | Unverified |
-| `CreateFrame("Frame")` | Event frame supporting `SetScript` and `RegisterEvent` | Unverified |
-| `SlashCmdList` / `SLASH_ROSTERQUARTERMASTER1` | Native `/rq` registration | Unverified |
-| `DEFAULT_CHAT_FRAME:AddMessage(text)` / `print(text)` | Diagnostics and fallback output | Unverified |
-| `GetMoney()` | Non-negative copper amount | New in 0.0.2; unverified |
-| `GetZoneText()` / `GetSubZoneText()` | Location labels, including an empty subzone | New in 0.0.2; unverified |
-| `NUM_TOTAL_EQUIPPED_BAG_SLOTS` / `NUM_BAG_SLOTS` | Equipped bag count, excluding backpack index 0 | New in 0.0.2; unverified |
-| `C_Container.GetContainerNumSlots` / `GetContainerNumSlots` | Slot count per equipped bag | New in 0.0.2; unverified |
-| `C_Container.GetContainerNumFreeSlots` / `GetContainerNumFreeSlots` | Free-slot count as first return | New in 0.0.2; unverified |
-| `GetProfessions()` | Up to six profession indices, possibly with nil holes | New in 0.0.2; unverified |
-| `GetProfessionInfo(index)` | Name, icon, rank, max rank, ability count, offset, skill-line ID | New in 0.0.2; unverified |
-| `C_Timer.After(seconds, callback)` | One-shot event coalescing | New in 0.0.2; unverified |
-| `InCombatLockdown()` | Boolean combat-lockdown state | New in 0.0.2; unverified |
-| Native frames, textures, `GameFontNormal`, `UIPanelButtonTemplate` | Registration choices; guarded construction | New in 0.0.2; unverified |
-| `Minimap`, button textures, `GameTooltip` | Fixed lower-left launcher, click toggle and hover tooltip | New in 0.0.4; unverified |
-| `UIPanelScrollFrameTemplate`, `SetScrollChild`, vertical scrolling | Roster card viewport | New in 0.0.4; unverified |
-| `InputBoxTemplate`, focus, Enter/Escape handlers | Planned-name editing without overwriting focused drafts | New in 0.0.4; unverified |
-| `SetMovable`, drag scripts, `GetPoint`, `SetClampedToScreen` | Saved/restored account window position | New in 0.0.4; unverified |
-| `UISpecialFrames` | Escape registration for the native `RQMainWindow` frame | New in 0.0.4; unverified |
-
-There is deliberately no guessed clock fallback or invented client-flavour
-identifier. Missing GUIDs use a normalized actual name/realm fallback when both
-are available. Missing all identifying information prevents capture instead of
-guessing a provisional roster slot.
-
-Profession capture uses stable numeric skill-line IDs from `GetProfessionInfo`.
-There is no localized-name-based `GetSkillLineInfo` fallback: the legacy API's
-ability to identify profession rows reliably is unresolved. Missing/restricted
-profession APIs leave the section incomplete and retain older observations.
-The skill-line IDs in the default planned roster are conventional planning
-defaults, not validated Forever recipe or profession data.
-
-Bag capture counts equipped capacity only; it does not scan item slots, bank,
-mail, or recipes. Missing bag-count constants result in unknown capacity rather
-than an assumed four-bag layout. Modern container methods are preferred when
-present, with legacy methods used only when their modern counterpart is absent.
-
-No combat-state API means no registration popup; chat commands still work.
-Failed native widget creation is reported and falls back to chat instructions.
-The dashboard likewise refuses to open without a known out-of-combat state and
-hides on combat entry. A failed native dashboard initialization stays disabled
-for that session; use text commands and reload after correcting the installation.
-If `UISpecialFrames` is absent, the Close button and `/rq close` remain available.
-If `Minimap` is absent, `/rq` still works and launcher detection retries on
-`PLAYER_ENTERING_WORLD`. A missing `GameTooltip` does not disable the launcher.
-
-## Events
-
-In addition to `ADDON_LOADED`, `PLAYER_LOGIN`, and `PLAYER_LOGOUT`, version 0.0.2
-registers the following unverified candidate events:
-
-- `PLAYER_ENTERING_WORLD`: identity reconciliation and full refresh.
-- `PLAYER_LEVEL_UP`, `PLAYER_XP_UPDATE`: progression/rested refresh; XP events for
-  non-player units are ignored.
-- `UPDATE_EXHAUSTION`: rested refresh.
-- `PLAYER_UPDATE_RESTING`: location/resting and rested refresh.
-- `PLAYER_MONEY`: money refresh.
-- `BAG_UPDATE_DELAYED`: capacity refresh only.
-- `SKILL_LINES_CHANGED`, `TRADE_SKILL_LIST_UPDATE`: profession skill refresh.
-- `ZONE_CHANGED_NEW_AREA`, `ZONE_CHANGED`, `ZONE_CHANGED_INDOORS`: location refresh.
-- `PLAYER_REGEN_DISABLED` / `PLAYER_REGEN_ENABLED`: hide/defer registration UI.
-
-Diagnostics distinguish **registered (not yet observed)** from **observed**.
-Successful registration alone does not prove that an event fires. Registration
-failures are reported individually and do not prevent other subscriptions.
-
-Events coalesce into one section-specific update after 0.25 seconds. If the timer
-API is absent/restricted, the addon warns once and refreshes immediately instead.
-Level-up capture is deferred with the timer so progression APIs can catch up.
-Without a working timer, use `/rq rescan` if the level-up event precedes the API
-state change. Logout captures synchronously and invalidates queued callbacks.
-No per-frame polling is performed. Quest, bank, and mail events are deferred.
-
-## Persistence
-
-`RQDB` is account-wide and `RQCharDB` is per-character. Version 0.0.2 keeps
-independent account-wide character snapshots, explicit registration status,
-provisional slot links, and per-character current-state copies.
-
-- Nil and structurally valid partial databases initialize at schema 3.
-- Schemas 1/2 migrate to schema 3 on copied data; both roots are validated before
-  either is replaced. The migration is idempotent.
-- Unknown fields are preserved during initialization.
-- Invalid table shapes or any explicit unsupported schema disable writes to
-  **both** databases. The originals are retained, with an explicit diagnostic.
-- Downgrading requires restoring the pre-upgrade backup; schema 3 is not
-  understood by earlier versions. Future changes require idempotent migrations.
-- A successful initializer means only that the in-memory tables are ready. It
-  does not prove the client wrote them to disk.
-
-### Version 0.0.1 client observations
-
-| Check | Observed result |
+| Evidence | Scope |
 | --- | --- |
-| Forever version/build/interface | User-reported 2026-10-02: 1.60.1 / 70170 / 16001; build date Oct 1 2026 |
-| Installation and `/rq diag` | User-reported pass, 2026-10-02; diagnostics "looks fine" |
-| `/rq rescan` after a state change | Covered by user's overall smoke-test pass; no separate output supplied |
-| API return types, including no-rested-XP behavior | Not individually confirmed |
-| Event delivery | Not individually confirmed |
-| `/reload` with retained account and character markers | Covered by user's overall smoke-test pass; no separate output supplied |
-| Full exit/restart with retained markers | Covered by user's overall smoke-test pass; no separate output supplied |
-| Logout timestamp written and retained | Not individually confirmed |
-| Missing/restricted API behavior in the client | Not individually confirmed |
-| Second-character isolation, level-cap cases, corrupt data, and combat | Extended manual tests not explicitly reported |
+| 2026-10-02 user report | 0.0.1 install, diagnostics/rescan, reload and restart smoke test |
+| Reported client | Forever 1.60.1 / build 70170 / interface 16001, build date Oct 1 2026 |
+| 2026-10-04 user report | 0.0.14 carried-item search working |
+| Subsequent user reports | Basic bank scanning and mail tracking working |
 
-### Version 0.0.2 client observations
+No individual pass is implied for API return shapes, every event, partial/error
+paths, combat, migration to schema 19 or the current visual workspace.
+Use [MANUAL_TEST_PLAN.md](MANUAL_TEST_PLAN.md) and
+[USER_ACCEPTANCE_TESTS.md](USER_ACCEPTANCE_TESTS.md) for current checks.
 
-| Check | Observed result |
-| --- | --- |
-| Schema-1 upgrade preserving existing data | Not run in client |
-| Add/link/ignore and editable provisional names | Not run in client |
-| Five account-wide records and GUID rename reconciliation | Not run in client |
-| Targeted XP/resting/location/money/bag/profession events | Not run in client |
-| Registration popup, combat deferral, and slash fallback | Not run in client |
-| Reload/restart with account-wide snapshots and links | Not run in client |
+## Removed API consumers
 
-### Version 0.0.4 client observations
+The runtime no longer provides LOW discard highlights, gear scoring/arrows/
+tooltip advice/editor, dungeon or Legacy tracking, or guide/next-20 leveling.
+Planned roster slots, links and presets are also removed. Their old API probes,
+UI contracts, profile data and guide compiler/import workflow are not release
+requirements or gated future features.
 
-| Check | Observed result |
-| --- | --- |
-| Native minimap button location, icon, tooltip and click toggle | Not run in client |
-| Roster/Settings tabs, card layout and scrolling | Not run in client |
-| Main, role, planned-name editing, offline controls and unlink/relink | Not run in client |
-| Schema-3 upgrade and window position across reload/restart | Not run in client |
-| Combat hiding, Escape/Close, and unavailable-UI fallback | Not run in client |
+Do not remove retained item tooltip/metadata access merely because gear advice
+is gone: recipe/bag capacity, binding and locked-container routing still need
+their own evidence. Likewise, manual `dungeonReady` is still a priority signal,
+not an API-backed dungeon tracker.
 
-If persistence fails, record the exact build and whether the failure occurs on
-reload, clean exit, or both. Do not describe data as durable until tested.
-Configuration export/import remains a later requirement, not an existing
-workaround.
+## Adapter and lifecycle boundaries
+
+All direct native calls belong in `RQ.Api`, including event/frame creation,
+chat, slash registration, item metadata, inventory movement on explicit clicks
+and optional graphics. Guard missing/restricted functions and invalid return
+shapes; an existing symbol is not proof of a supported contract.
+
+Diagnostics distinguish unavailable, failed and registered-but-unobserved
+events. Event registration alone does not prove delivery. Modern container
+methods are preferred where supported; legacy fallback must not hide a failed
+modern call by inventing valid data.
+
+Login/rescan captures identity and current sections. XP/resting, location, money,
+bag and skill events refresh relevant sections with debouncing; recipe-window,
+bank and mail events have their own coherence checks. Logout invalidates queued
+work and preserves safe final observations. No retired bag-overlay polling is
+required.
+
+Verify these event groups rather than assuming registration proves behavior:
+
+- `ADDON_LOADED`, `PLAYER_LOGIN`, `PLAYER_LOGOUT`, `PLAYER_ENTERING_WORLD`.
+- `PLAYER_LEVEL_UP`, `PLAYER_XP_UPDATE`, `UPDATE_EXHAUSTION`,
+  `PLAYER_UPDATE_RESTING`.
+- `PLAYER_MONEY`, zone/subzone changes and loading transitions.
+- Bag updates, bank open/close/slot changes and item metadata availability.
+- Skill changes, owned profession window opening and recipe list updates.
+- Mail open/close/update/send-success/send-failure and observed manual takes.
+- Combat entry/exit for safe UI hiding and registration behavior.
+
+Missing timer support must remain explicit and use guarded immediate refresh
+where supported. Rescan after delayed level/API state changes. Successful
+initialization does not prove that the client wrote SavedVariables to disk.
+
+## Identity, progression and rested evidence
+
+GUIDs are canonical; names are display values. For the observed Forever 1.60.x /
+interface 16001 contract, `UnitNameUnmodified("player")` can expose first name
+and surname, not the usual name/realm pair. Preserve the separately observed
+realm and avoid duplicating already-full names. Other versions require their
+own contract checks. A manual full-name override is explicit configuration.
+
+A successful `GetXPExhaustion` returning `nil` is provisionally interpreted as
+zero rested XP. Missing/failing/restricted calls mean unknown instead; verify
+this distinction live. Zero XP or zero rested XP is valid, but a zero XP maximum
+during logout teardown must not destroy a complete earlier baseline.
+
+Offline rested is estimated from timestamped logout evidence under configurable
+rates/caps. Cached fallback logout samples are lower confidence and cannot teach
+rates. Perk-driven rate changes remain manual; there is no Legacy API dependency.
+Resource blockers and dungeon readiness are user inputs, not observed quests.
+
+## Native professions and recipe groceries
+
+Only ready owned profession windows provide recipe evidence. Linked/guild
+windows are not the current character's learned recipes. Independently cache
+per-profession scans; incomplete reads keep older evidence with errors.
+
+Verify native skill-line classification, skill/cap, learned status, difficulty,
+reagent completeness, skill-up count and output/acquisition metadata. Orange
+means currently optimal difficulty, not guaranteed skill-ups to an arbitrary
+target. Unknown/alternative reagents cannot become guessed requirements.
+
+One-craft groceries derive from eligible learned orange recipes below observed
+skill cap. Goal overrides, stock floors and bag-crafting materials use existing
+pure allocation logic. No external guide, approval record or next-20 route
+supplies missing facts.
+
+The profession-lag ceiling 300 and `5 * level` benchmark are assumptions.
+Profession-pair advice uses reference relationships and observed same-realm
+coverage; it does not certify trainer availability, Forever recipes or equipment.
+Saved intended profession choices are not learned skill/provider evidence.
+
+## Item names, search and bag planning
+
+Item IDs remain canonical. Name/icon resolution may use observed links and
+guarded modern/legacy item APIs, then request cold-cache data and refresh on
+availability. Missing metadata stays an ID/unknown label, not a guessed name.
+Name arrival cannot change stock. Copy reports must be reopened to reflect
+later metadata.
+
+Search includes observed bags, personal bank and mail with per-source ownership,
+counts and timestamps. Discovery includes disabled registered members, reserved
+or bound items and other realms; it does not authorize their transfer.
+
+Bag planning needs observed general-purpose output capacity, binding, quantities
+and equipped regular-bag slots. Do not infer capacity from recipe names or supply
+a guessed four-bag layout if container constants are missing. Ready-bag allocation
+uses carried stock; bank/mail coverage is not evidence of an equippable carried
+bag. Unknown outputs, variable quantities and unsupported containers stay blocked.
+
+## Personal-bank coherence
+
+Scan personal-bank containers only while accessible. Pair stable bag and bank
+observations so a deposit/withdrawal cannot leave the same item credited in both.
+Early close, unsupported tabs, missing slots or changing scans preserve uncertainty.
+Older unconfirmed snapshots remain discovery-only until a coherent visit.
+
+Owner bank materials can cover groceries with an explicit withdrawal prerequisite.
+Bank-transfer suggestions require withdrawal and a fresh proposal, not phantom
+recipient credit. No account/guild-bank access or remote bank refresh is assumed.
+Basic older user reports do not cover rapid transfers, bank capacity extremes
+or interrupted scans in 0.0.34.
+
+## Routing and explicit mail attachment
+
+`UnitFactionGroup("player")` supplies the canonical Alliance/Horde faction.
+Neutral, missing and restricted results do not establish a new tradable faction.
+Ruleset inference accepts only an explicit PvE/PvP token in `GetRealmName()`;
+it does not use the current PvP flag, War Mode or realm-list selection. On
+unlabelled realms the user must confirm ruleset in Manage roster. This fallback
+and native faction need live Forever verification on both rulesets/factions.
+
+All mail, bag-transfer/crafting, pending-shipment and profession-provider paths
+share a known matching ruleset/faction/realm predicate. Existing observations
+are not migrated by guessing faction from race. Cross-realm sending is still
+unverified and blocked even if the combination matches.
+
+Cooking/Fishing assignments are GUID-keyed per combination. Raw meat/fish uses
+an explicit Classic ID allowlist, including raw fish that can also be used by
+other professions. Sender needs/reserves are retained; prepared food and
+unknown beta IDs are not name-classified. Explicit `food` category membership
+opts an unknown ID into this priority. Assignment alone does not prove skills.
+
+Recipe/material routing retains native classification and binding safeguards.
+Uncommon BoE equipment is only a disenchanting candidate; there is no remaining
+gear score or upgrade-protection claim. Sender reserves/needs take priority.
+Cooking/Fishing ingredients then precede other recipient groceries and explicit
+surplus orders; other items retain the existing routing priorities.
+
+Mage routing uses item ID 17056 for Light Feathers and the exact observed `Scroll:`
+prefix for scrolls. The latter is a narrow name rule, not a universal localized
+scroll classifier. Unknown names and `Scroll of ...` do not match it.
+
+Rogue routing requires per-instance `C_TooltipInfo.GetBagItem` evidence and the
+client's localized locked label. Requiring unlocking is distinct from the
+container's temporary busy `isLocked` state. Unknown tooltip evidence is not
+cached as a new fact; Attach must select/recheck the actually locked instance.
+No Lockpicking skill guarantee is made.
+
+Native attachment calls run only after an explicit click with open mailbox,
+verified full recipient, same ruleset/faction/realm, known non-combat state, empty cursor and
+compatible draft/free slots. Revalidate immediately before moving stock; stop
+on changing draft/API failures and report partial progress. Opening a report
+never attaches anything. Sending/collection remain manual.
+
+## Shipment and inbox contract
+
+Default observation mode records eligible send attempts/success without claiming
+delivery. Passive capture must not infer a draft from old cached data if the
+native draft cleared before the hook read it. COD and unresolved/non-roster
+recipients cannot create usable credit.
+
+Only after verifying actual successful sends can users confirm specific
+observations. Automatic confirmation is opt-in with `/rq mail-tracking verify`
+for the exact version/build/interface; any build change invalidates it.
+Do not enable it merely because mocked send-success tests pass.
+
+Inbox coverage requires stable complete loaded inbox/bag observations and
+conservative unique reconciliation. Collection needs matching observed manual
+takes, removed attachments and carried gains. Duplicates, returns, partial
+loads, stale evidence or interrupted operations stay uncertain.
+
+Confirmed pending/verified inbox quantities are provisional material coverage,
+not carried stock, donor stock or proof of delivery. Cached active-character
+mail must be reverified after login. Verify duplicate matching, partial collection,
+COD, returns, failed sends and mailbox close/reopen in the client.
+
+## Optional Auctionator craft costs
+
+The adapter capability-checks `Auctionator.API.v1.GetAuctionPriceByItemID`,
+passing caller ID `RosterQuartermaster` and the reagent item ID. Unit prices
+are interpreted as copper and multiplied by required quantities in a pure helper.
+Missing/invalid prices and API failures surface as unavailable; partial totals
+are never presented as full craft costs. Quotes are restricted to the active
+realm/ruleset/faction market and described as cached estimates, not live offers.
+Mock tests cover the contract; live Forever/Auctionator compatibility is pending.
+No third-party library is bundled or required.
+
+Activity/counter/calendar consumers and generated session lists are removed.
+The ordinary GetMoney snapshot remains; it is not a financial ledger.
+
+## UI and persistence
+
+Four native tabs are Roster / Bags and Inventory / Professions / Settings. Current UI needs
+client checks for grocery columns/filters, long names, scroll preservation,
+roster size, inventory pages, compact groceries, combat hiding and text fallbacks.
+No UI should offer retired slots, advisor, highlights, progress or guides.
+
+Missing combat-state support means no registration popup/dashboard opening.
+Missing minimap/tooltip/keyboard helpers should degrade to text or basic controls,
+not disable retained planning. Closed/hidden views should not rebuild on every
+snapshot update.
+
+Schema 16 removes retired state only, preserving registered characters,
+main/role/retained settings and observations. Both roots validate before
+publication; malformed/future schemas preserve originals and disable writes.
+Back up account and per-character SavedVariables with the client closed.
+Old-schema exports require a fresh post-upgrade export; configuration transfer
+does not back up snapshots or prove disk persistence.
+
+Record reload and full clean-exit/restart outcomes separately. Do not describe
+0.0.38 as durable or client-tested until those checks have actually passed.

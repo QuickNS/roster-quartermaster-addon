@@ -2,11 +2,6 @@ local Prompt = { announced = false, Choose = RQ.SnapshotService.Register }
 RQ.RegistrationPrompt = Prompt
 
 function Prompt.Show(force)
-    if force then
-        Prompt.deferred = false
-    elseif Prompt.deferred then
-        return
-    end
     local record = RQ.Database.Current()
     if not record then
         if force then
@@ -18,7 +13,7 @@ function Prompt.Show(force)
         return
     end
     if not Prompt.announced or force then
-        RQ.Api.Print("Register this character: /rq add, /rq link <slot>, or /rq ignore. Use /rq slots for choices.")
+        RQ.Api.Print("Register this character: /rq add or /rq ignore.")
         Prompt.announced = true
     end
     local choices = {
@@ -29,29 +24,10 @@ function Prompt.Show(force)
             end,
         },
     }
-    for _, id in ipairs(RQ.Util.Keys(RQDB.plannedRoster)) do
-        local slot = RQDB.plannedRoster[id]
-        if not slot.claimedBy or slot.claimedBy == RQCharDB.characterId then
-            local slotId = id
-            choices[#choices + 1] = {
-                label = "Link: " .. (slot.plannedName or slotId) .. " (" .. slotId .. ")",
-                run = function()
-                    return Prompt.Choose("link", slotId)
-                end,
-            }
-        end
-    end
     choices[#choices + 1] = {
         label = "Ignore this character",
         run = function()
             return Prompt.Choose("ignore")
-        end,
-    }
-    choices[#choices + 1] = {
-        label = "Decide later",
-        run = function()
-            Prompt.deferred = true
-            return true
         end,
     }
     RQ.Api.ShowRegistrationPrompt(

@@ -2,30 +2,52 @@
 ## Title: Roster Quartermaster
 ## Notes: Account-wide roster snapshots for World of Warcraft: Forever.
 ## Author: Roster Quartermaster contributors
-## Version: 0.0.6
+## Version: 0.0.38
+## OptionalDeps: Auctionator
 ## SavedVariables: RQDB
 ## SavedVariablesPerCharacter: RQCharDB
 
 Core/Namespace.lua
 Core/Util.lua
 Core/Api.lua
-Data/DefaultRoster.lua
 Data/DefaultPolicies.lua
+Data/ProfessionRelationships.lua
+Data/CookingItems.lua
 Core/PlanningConfig.lua
 Core/SuppliesConfig.lua
+Core/LogisticsPolicies.lua
+Core/MailConfig.lua
+Core/ProfessionConfig.lua
 Models/Character.lua
 Models/Snapshot.lua
 Services/RestedEstimator.lua
 Services/PriorityEngine.lua
+Services/ProfessionStatus.lua
 Core/Migrations.lua
+Core/ConfigTransfer.lua
 Core/Database.lua
+Services/ConfigTransferService.lua
 Services/PlanningService.lua
+Services/InventoryAvailability.lua
+Services/MailTracker.lua
+Services/MailService.lua
+Services/BankService.lua
+Services/BagPlanner.lua
+Services/InventorySearch.lua
+Services/WorkspaceScope.lua
 Services/SuppliesService.lua
+Services/LogisticsPolicyService.lua
+Services/ProfessionAdvisor.lua
+Services/ProfessionAdviceService.lua
 Services/SnapshotService.lua
 UI/RegistrationPrompt.lua
 UI/CharacterCard.lua
 UI/RosterPanel.lua
 UI/TodayPanel.lua
+UI/WorkspaceView.lua
+UI/BagPanel.lua
+UI/ShipmentPanel.lua
+UI/ProfessionPanel.lua
 UI/MainWindow.lua
 Core/Diagnostics.lua
 Bootstrap.lua

@@ -42,6 +42,17 @@ function Snapshot.Apply(snapshot, section, values, now)
     return complete
 end
 
+function Snapshot.SectionState(snapshot, section, now, hours)
+    local value = snapshot.sections and snapshot.sections[section]
+    if not value or not value.complete or not RQ.Util.IsNumber(value.observedAt) or value.observedAt == 0 then
+        return "UNKNOWN"
+    end
+    if not RQ.Util.IsNumber(now) or now < value.observedAt or now - value.observedAt >= hours * 3600 then
+        return "STALE"
+    end
+    return "RECENT"
+end
+
 function Snapshot.Freshness(snapshot, now, staleHours)
     if not RQ.Util.IsNumber(now) or not RQ.Util.IsNumber(snapshot.lastSeen) or snapshot.lastSeen == 0 then
         return "UNKNOWN"

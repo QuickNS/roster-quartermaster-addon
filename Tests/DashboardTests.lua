@@ -16,25 +16,35 @@ return function(h)
 
     local function secondCharacter()
         local record = RQ.Util.Copy(RQ.Database.Current())
-        record.identity = { guid = "Player-Second", displayName = "Second", realm = "OtherRealm", class = "PRIEST" }
+        record.identity = {
+            ruleset = "PVE",
+            faction = "Horde",
+            guid = "Player-Second",
+            displayName = "Second",
+            realm = "OtherRealm",
+            class = "PRIEST",
+        }
         record.registration = "pending"
         RQDB.characters["Player-Second"] = record
         return record
     end
 
-    test("schema two upgrades without mutating links, settings or source tables", function()
+    test("schema two upgrades without mutating membership settings or source tables", function()
         start()
-        assert(RQ.Database.Register("link", "warrior"))
+        assert(RQ.Database.Register("add"))
+        assert(RQ.Database.SetMain("Player-Test-1"))
+        assert(RQ.Database.SetRole("Player-Test-1", "TANK"))
         RQDB.schemaVersion, RQCharDB.schemaVersion = 2, 2
         RQDB.settings.window = nil
         RQDB.settings.custom = { value = 42 }
         local oldAccount = RQDB
         local account, character, err = RQ.Migrations.Prepare(RQDB, RQCharDB)
         assert(account and character, err)
-        equal(account.schemaVersion, 5)
-        equal(character.schemaVersion, 5)
-        equal(account.roster["Player-Test-1"].slotId, "warrior")
-        equal(account.plannedRoster.warrior.claimedBy, "Player-Test-1")
+        equal(account.schemaVersion, 19)
+        equal(character.schemaVersion, 19)
+        equal(account.roster["Player-Test-1"].isMain, true)
+        equal(account.roster["Player-Test-1"].role, "TANK")
+        equal(account.plannedRoster, nil)
         equal(account.settings.window.point, "CENTER")
         equal(oldAccount.settings.window, nil)
         equal(oldAccount.schemaVersion, 2)
@@ -97,41 +107,39 @@ return function(h)
         equal(RQ.CharacterCard.Age(100, 86500), "1d ago")
     end)
 
-    test("only one main is selected and later links cannot reclaim the old default", function()
+    test("only one main is selected and repeated registration cannot reclaim it", function()
         start()
-        assert(RQ.Database.Register("link", "warrior"))
-        secondCharacter()
-        assert(RQ.Database.Register("add", nil, "Player-Second"))
+        assert(RQ.Database.Register("add"))
+        assert(RQ.Database.SetMain("Player-Test-1"))
+        local other = secondCharacter()
+        other.identity.realm = RQ.Database.Current().identity.realm
+        assert(RQ.Database.Register("add", "Player-Second"))
         assert(RQ.Database.SetMain("Player-Second"))
         equal(RQDB.roster["Player-Test-1"].isMain, false)
         equal(RQDB.roster["Player-Second"].isMain, true)
-        equal(RQDB.plannedRoster.warrior.isMain, false)
-        assert(RQ.Database.Register("link", "warrior"))
+        assert(RQ.Database.Register("add"))
         equal(RQDB.roster["Player-Test-1"].isMain, false)
-        assert(RQ.Database.Register("ignore", nil, "Player-Second"))
+        assert(RQ.Database.Register("ignore", "Player-Second"))
         equal(RQDB.roster["Player-Second"].isMain, false)
         equal(RQ.Database.SetMain("Player-Second"), false)
-        assert(RQ.Database.Register("add", nil, "Player-Second"))
+        assert(RQ.Database.Register("add", "Player-Second"))
         equal(RQDB.roster["Player-Second"].isMain, false)
     end)
 
-    test("roles and explicit unlink/relink preserve GUID snapshots and main choice", function()
+    test("roles and repeated registration preserve GUID snapshots and main choice", function()
         start()
-        assert(RQ.Database.Register("link", "warrior"))
+        assert(RQ.Database.Register("add"))
+        assert(RQ.Database.SetMain("Player-Test-1"))
         assert(RQ.Database.SetRole("Player-Test-1", "FLEX"))
         equal(RQDB.roster["Player-Test-1"].role, "FLEX")
-        equal(RQDB.plannedRoster.warrior.role, "FLEX")
         equal(RQ.Database.SetRole("Player-Test-1", "invalid"), false)
         equal(RQ.Database.SetRole("missing", "TANK"), false)
         local snapshot = RQ.Database.Current().snapshot
-        assert(RQ.Database.Unlink("Player-Test-1"))
-        equal(RQDB.plannedRoster.warrior.claimedBy, nil)
-        equal(RQDB.plannedRoster.warrior.isMain, false)
+        assert(RQ.Database.Register("add"))
         equal(RQDB.roster["Player-Test-1"].isMain, true)
-        assert(RQ.Database.Register("link", "druid"))
+        assert(RQ.Database.SetRole("Player-Test-1", "HEALER"))
         equal(RQDB.roster["Player-Test-1"].isMain, true)
-        equal(RQDB.plannedRoster.druid.isMain, true)
-        equal(RQDB.roster["Player-Test-1"].slotId, "druid")
+        equal(RQDB.roster["Player-Test-1"].role, "HEALER")
         equal(RQ.Database.Current().snapshot, snapshot)
     end)
 
@@ -142,33 +150,34 @@ return function(h)
         RQ.Api.GetCharacterProgression = function()
             error("must not capture an offline character")
         end
-        assert(RQ.SnapshotService.Register("link", "priest", "Player-Second"))
+        assert(RQ.SnapshotService.Register("add", "Player-Second"))
         assert(RQ.Database.SetRole("Player-Second", "HEALER"))
         equal(offline.snapshot.lastSeen, before.lastSeen)
         equal(offline.snapshot.level, before.level)
         equal(RQ.Database.activeId, "Player-Test-1")
         equal(RQCharDB.identity.guid, "Player-Test-1")
-        assert(RQ.SnapshotService.Register("ignore", nil, "Player-Second"))
+        assert(RQ.SnapshotService.Register("ignore", "Player-Second"))
         equal(offline.registration, "ignored")
-        equal(RQDB.plannedRoster.priest.claimedBy, "Player-Second")
+        equal(RQDB.roster["Player-Second"].enabled, false)
+        equal(RQDB.roster["Player-Second"].role, "HEALER")
     end)
 
-    test("cards expose actual and planned state without fabricating offline rested estimates", function()
+    test("member cards expose stale observations without fabricating offline rested estimates", function()
         start()
-        assert(RQ.Database.Register("link", "warrior"))
+        assert(RQ.Database.Register("add"))
         local offline = secondCharacter()
-        offline.registration = "ignored"
+        assert(RQ.Database.Register("add", "Player-Second"))
         offline.snapshot.lastSeen = 1
         offline.snapshot.sections.money.complete = false
         local view = RQ.RosterPanel.Build(RQDB, RQ.Database.activeId, 123456789)
-        equal(#view.cards, 6)
+        equal(#view.cards, 2)
         local card
         for _, entry in ipairs(view.cards) do
             if entry.id == "Player-Second" then
                 card = entry
             end
         end
-        contains({ card.body }, "Registration: ignored")
+        contains({ card.body }, "Registration: member")
         contains({ card.body }, "STALE")
         contains({ card.body }, "last observed offline; not an estimate")
         contains({ card.body }, "money")
@@ -176,7 +185,7 @@ return function(h)
             "unknown",
             { identity = {}, snapshot = {}, registration = "pending" },
             nil,
-            nil,
+            123456789,
             nil,
             48
         )
@@ -219,6 +228,64 @@ return function(h)
             end
         end
         equal(count, 1)
+    end)
+
+    test("minimap launcher is discoverable by collectors that skip unnamed buttons", function()
+        local frames = start(true)
+        local found
+        for _, widget in ipairs(frames.widgets) do
+            if
+                widget.kind == "Button"
+                and widget:GetParent() == _G.Minimap
+                and widget:GetName()
+                and widget.scripts.OnClick
+            then
+                found = widget
+                break
+            end
+        end
+        assert(found, "Collector skipped the unnamed RQ minimap button")
+        equal(found:GetName(), "RQMinimapButton")
+        equal(_G.RQMinimapButton, found)
+        equal(found:GetWidth(), 32)
+        equal(found:GetHeight(), 32)
+        frames.Click(found)
+        equal(RQ.Api.IsRosterWindowShown(), true)
+    end)
+
+    test("collector reparenting positioning and visibility survive world entry without duplicate launchers", function()
+        local frames = start(true)
+        local button = frames.MinimapButton()
+        local drawer = _G.CreateFrame("Frame", nil, _G.UIParent)
+        button:SetParent(drawer)
+        button:ClearAllPoints()
+        button:SetPoint("TOPLEFT", drawer, "TOPLEFT", 4, -4)
+        button:Hide()
+        frames.Emit("PLAYER_ENTERING_WORLD")
+        frames.Emit("PLAYER_ENTERING_WORLD")
+        equal(button:GetParent(), drawer)
+        equal(button:IsShown(), false)
+        local point, relative, relativePoint, x, y = button:GetPoint()
+        equal(point, "TOPLEFT")
+        equal(relative, drawer)
+        equal(relativePoint, "TOPLEFT")
+        equal(x, 4)
+        equal(y, -4)
+        local count = 0
+        for _, widget in ipairs(frames.widgets) do
+            if widget:GetName() == "RQMinimapButton" then
+                count = count + 1
+            end
+        end
+        equal(count, 1)
+        button:Show()
+        frames.Click(button)
+        equal(RQ.Api.IsRosterWindowShown(), true)
+        button.scripts.OnEnter(button)
+        equal(_G.GameTooltip.owner, button)
+        equal(_G.GameTooltip.text, "Roster Quartermaster")
+        button.scripts.OnLeave(button)
+        equal(_G.GameTooltip:IsShown(), false)
     end)
 
     test("missing tooltip does not break the minimap launcher", function()
@@ -278,6 +345,15 @@ return function(h)
 
     test("dashboard has scrollable cards, an escape registration and working close button", function()
         local frames = start(true)
+        assert(RQ.Database.Register("add"))
+        local template = secondCharacter()
+        RQ.MainWindow.realm, RQ.MainWindow.group = "all", "all"
+        for index = 1, 20 do
+            local id = "Player-Scroll-" .. index
+            RQDB.characters[id] = RQ.Util.Copy(template)
+            RQDB.characters[id].identity.guid = id
+            assert(RQ.Database.Register("add", id))
+        end
         _G.SlashCmdList.ROSTERQUARTERMASTER("roster")
         equal(RQ.Api.IsRosterWindowShown(), true)
         contains(_G.UISpecialFrames, "RQMainWindow")
@@ -325,23 +401,18 @@ return function(h)
         equal(_G.RQMainWindow.points[1][5], -77)
     end)
 
-    test("settings buttons link, edit, set main and role, ignore and resume", function()
+    test("manage buttons add set main and role ignore and resume", function()
         local frames = start(true)
-        _G.SlashCmdList.ROSTERQUARTERMASTER("settings")
-        frames.Click(frames.FindButton("Link selected character"))
+        assert(RQ.MainWindow.Open("manage"))
+        frames.Click(frames.FindButton("Add / resume"))
         h.flushTimers()
-        equal(RQDB.roster["Player-Test-1"].slotId, "druid")
+        equal(RQ.Database.Current().registration, "member")
         frames.Click(frames.FindButton("Make main"))
         h.flushTimers()
         equal(RQDB.roster["Player-Test-1"].isMain, true)
-        frames.Click(frames.FindButton("Role: Flexible (next)"))
+        frames.Click(frames.FindButton("Role: Unassigned (next)"))
         h.flushTimers()
-        equal(RQDB.roster["Player-Test-1"].role, "UNASSIGNED")
-        local edit = frames.FindKind("EditBox")
-        edit:SetText("Luna Tick")
-        edit.scripts.OnEnterPressed(edit)
-        h.flushTimers()
-        equal(RQDB.plannedRoster.druid.plannedName, "Luna Tick")
+        equal(RQDB.roster["Player-Test-1"].role, "TANK")
         frames.Click(frames.FindButton("Ignore"))
         h.flushTimers()
         equal(RQ.Database.Current().registration, "ignored")
@@ -349,38 +420,40 @@ return function(h)
         frames.Click(frames.FindButton("Add / resume"))
         h.flushTimers()
         equal(RQ.Database.Current().registration, "member")
-        frames.Click(frames.FindButton("Unlink slot"))
-        h.flushTimers()
-        equal(RQDB.plannedRoster.druid.claimedBy, nil)
+        equal(RQDB.roster["Player-Test-1"].role, "TANK")
+        equal(RQDB.roster["Player-Test-1"].isMain, false)
     end)
 
-    test("live refresh preserves focused name drafts and selected slot changes reset them", function()
+    test("live refresh preserves focused profession ceiling drafts until saved", function()
         local frames = start(true)
-        _G.SlashCmdList.ROSTERQUARTERMASTER("settings")
+        assert(RQ.MainWindow.Open("manage"))
         local edit = frames.FindKind("EditBox")
         edit:SetFocus()
-        edit:SetText("Unsaved draft")
+        edit:SetText("225")
         assert(RQ.SnapshotService.Refresh())
         h.flushTimers()
-        equal(edit:GetText(), "Unsaved draft")
-        frames.Click(frames.FindButton("Next", 2))
+        equal(edit:GetText(), "225")
+        equal(RQDB.settings.professionLag.ceiling, 300)
+        frames.Click(frames.FindButton("Save ceiling"))
         h.flushTimers()
-        equal(edit:GetText(), "Miss Tombsie")
-        equal(RQDB.plannedRoster.druid.plannedName, "Kit Cat")
+        equal(RQDB.settings.professionLag.ceiling, 225)
+        edit:SetFocus()
         edit.scripts.OnEscapePressed(edit)
-        equal(RQ.Api.IsRosterWindowShown(), false)
+        equal(edit:HasFocus(), false)
+        equal(RQ.Api.IsRosterWindowShown(), true)
     end)
 
     test("configure buttons target their own offline card rather than the active character", function()
         local frames = start(true)
+        RQ.MainWindow.realm, RQ.MainWindow.group = "all", "all"
         local offline = secondCharacter()
+        assert(RQ.Database.Register("add", "Player-Second"))
         _G.SlashCmdList.ROSTERQUARTERMASTER("roster")
-        local button = frames.FindButton("Configure")
-        equal(button.parent.characterId, "Player-Second")
+        RQ.MainWindow.selectedId = "Player-Second"
+        assert(RQ.MainWindow.Render())
+        local button = frames.FindButton("Configure selected")
         frames.Click(button)
         equal(RQ.MainWindow.selectedId, "Player-Second")
-        frames.Click(frames.FindButton("Add / resume"))
-        h.flushTimers()
         equal(offline.registration, "member")
         equal(RQ.Database.Current().registration, "pending")
         frames.Click(frames.FindButton("Make main"))
@@ -435,9 +508,9 @@ return function(h)
         frames.Click(frames.MinimapButton())
         equal(RQ.Api.IsRosterWindowShown(), false)
         contains(h.messages(), "Dashboard unavailable:")
-        contains(h.messages(), "No recommendation")
-        _G.SlashCmdList.ROSTERQUARTERMASTER("link warrior")
-        equal(RQDB.roster["Player-Test-1"].slotId, "warrior")
+        contains(h.messages(), "tracked character(s)")
+        _G.SlashCmdList.ROSTERQUARTERMASTER("add")
+        equal(RQDB.roster["Player-Test-1"].enabled, true)
         contains(RQ.Diagnostics.Report(), "rosterWindow: error:")
     end)
 

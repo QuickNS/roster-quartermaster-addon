@@ -1,243 +1,268 @@
-# SavedVariables schema 5
+# SavedVariables schema 19
 
-`RQDB` is account-wide; `RQCharDB` is per-character. Both declare
-`schemaVersion = 5`. Initialization happens after SavedVariables load.
+Schema 18 is used by **0.0.38**, adding saved minimap placement to the trade-group schema.
+This document describes the retained
+data contract; it is not evidence of a successful client migration.
 
-## Account state
+## Account and per-character state
 
-| Field | Purpose |
+`RQDB` is account-wide. `RQCharDB` is the independent current-character mirror.
+Both publish schema 19 only after successful validation.
+
+| State | Purpose |
 | --- | --- |
-| `settings` | Existing settings and user extensions are preserved. |
-| `settings.window` | Native window anchor: `point`, `relativePoint`, finite signed `x`/`y` offsets. |
-| `settings.planning` | Rates, cap, level rules, milestones, weights, optional pinned character ID. |
-| `session` | Current and previous character IDs; same-character reload does not rotate history. |
-| `policies.staleSnapshotHours` | Non-negative threshold, default 48 hours. |
-| `plannedRoster[slotId]` | Editable planning configuration, seeded once from `Data/DefaultRoster.lua`. |
-| `roster[characterId]` | Confirmed member configuration plus observed identity fields. |
-| `characters[characterId]` | Snapshot record for a pending, member, or ignored character. |
+| `RQDB.settings` | Window position, rested assumptions, profession lag and logistics policy |
+| `RQDB.settings.minimapAngle` | Account-wide minimap angle in degrees, finite and in `[0, 360)`, default 225 |
+| `RQDB.roster[characterId]` | Actual member configuration: role/main/enabled and planning overrides |
+| `RQDB.characters[characterId]` | Identity, registration and timestamped observations/configuration |
+| `RQDB.policies` | Snapshot freshness policy (default 48 hours) |
+| `RQDB.session` | Current/previous character and retained session context |
+| `RQDB.mailTracking` | Roster shipment evidence and mail contract verification |
 
-Slot IDs (`warrior`, `priest`, `druid`, `rogue`, `shaman`) are configuration keys,
-not actual identities. A linked slot contains `claimedBy = characterId`; the
-member entry has the reciprocal `slotId`. Migration rejects inconsistent links.
-Deleted slots or an explicitly empty slot table are not recreated on reload.
+A character record retains identity, registration, snapshot, inventory, recipes,
+rested state, supplies and profession intent. Current-character mirrors
+are copied rather than aliased. Account records are authoritative on attachment;
+configuration-only import must not substitute old observations for new ones.
 
-A character record contains:
-
-```lua
-{
-    registration = "pending", -- or "member", "ignored"
-    identity = { guid = "...", displayName = "...", realm = "...", class = "...", race = "..." },
-    snapshot = {
-        level = 25, xp = 12000, xpMax = 40000, restedXp = 20000,
-        money = 12345, zone = "...", subZone = "...", wasResting = false,
-        bagSlots = 32, freeBagSlots = 10,
-        lastSeen = 123456789, lastLogout = 123456000,
-        professions = {
-            [186] = { name = "Mining", skill = 100, maxSkill = 150 },
-        },
-        sections = {
-            progression = { complete = true, observedAt = 123456789, attemptedAt = 123456789 },
-            -- rested, location, money, bags, professions use the same metadata.
-        },
-    },
-    inventory = {
-        bags = { scannedAt = 0, complete = false, items = {} },
-        bank = { scannedAt = 0, complete = false, items = {} },
-        mail = { scannedAt = 0, complete = false, items = {} },
-    },
-    recipes = { scannedAt = 0, complete = false, items = {} },
-}
-```
-
-These are example values, not initialization defaults. Unknown scalar values are
-absent. Planned profession IDs are intentions, not learned profession snapshots.
-Bag items and opened profession recipes are observed in schema 5, as described below.
-Bank and mail inventories remain unknown; absent data is not zero stock.
-
-## Per-character state
-
-`RQCharDB` contains `characterId` plus independent copies of the current record's
-`identity`, `snapshot`, `inventory`, `recipes`, `restedState`, and `supplies`. There are no shared mutable
-snapshot tables between the two SavedVariables roots. Unknown extension fields
-from the previous schema are preserved.
-
-On login, an existing account record is authoritative. If it does not exist,
-matching per-character legacy identity/snapshot data is imported before the
-first capture. Other characters' account records are never replaced with the
-current character's snapshot.
+There is no planned roster table, provisional slot, default composition or
+character-count cap. Transfer serialization and UI pagination have separate
+bounds, not limits on roster membership.
 
 ## Identity and registration
 
-- A GUID is canonical whenever present.
-- The fallback is `name:<normalized actual name>-<normalized realm>`; name is
-  trimmed/lowercased and realm whitespace is removed before lowercasing.
-- A temporarily missing GUID may reuse the prior GUID only when actual name and
-  realm still match. Missing all current identity evidence suspends capture.
-- When a GUID becomes available, the matching actual-name fallback record and
-  its slot/configuration links, pin, and session references are rekeyed together.
-- Existing GUID and fallback records are not silently merged: capture is
-  suspended and the conflict is reported. Restore a known-good backup or resolve
-  the saved-data conflict with explicit user approval.
-- Provisional names are never used for matching. A new snapshot starts pending;
-  only a user action makes it a roster member or links a slot.
-- Ignore stops snapshot updates and excludes the record from text roster output.
-  The dashboard keeps an ignored card for explicit re-enabling. Existing role
-  configuration and links are retained, but the main designation and pin are cleared.
-- Main selection clears other member and provisional-main flags. Linking another
-  character never overrides an existing explicitly selected main.
-- Role changes update the member and its linked provisional slot. Offline
-  configuration uses the stored character ID and never captures active APIs into
-  that character's snapshot.
-- Unlink releases the slot but preserves the member, role, main choice, and
-  snapshot. Reassigning requires this explicit unlink before linking elsewhere.
+Character GUIDs are canonical. Actual name/realm fallback IDs can be promoted
+when a GUID is observed; conflicts preserve the original records and report an
+error instead of guessing a merge. Display/full names can change independently.
+Unmodified first name/surname observations remain distinct from realm evidence.
 
-Fallback-only renames cannot be reconciled safely without additional identity
-evidence. GUID rename behavior is covered by tests.
+Identity may also contain `faction` (`Alliance`, `Horde`, or `Neutral`),
+`ruleset` (`PVE` or `PVP`), and `rulesetSource` (`realm-name` or `manual`).
+Missing fields remain unknown. Faction is native observation; ruleset uses an
+explicit realm-name token or a user-confirmed fallback. A realm change clears
+the old ruleset before new observations are applied. Native observations
+override manual ruleset values. Ordinary unavailable reads retain last known
+identity values; neutral observations explicitly block trading.
+
+`Character.TradeGroup` returns one of four `ruleset:faction` keys only for known
+Alliance/Horde identities. `Character.CanTrade` additionally requires a known,
+normalized matching realm. All transfer-producing planners, address resolution,
+attachment eligibility, pending-mail coverage and profession-provider coverage
+use this shared predicate. Local stock and local bag upgrades remain usable
+without knowing a trade group. Account-wide inventory display is not a transfer.
+Main is exclusive within each realm/ruleset/faction key; no pin remains.
+
+Registration states:
+
+- `pending`: identity observed, no explicit membership decision.
+- `member`: explicitly added/resumed; roster configuration exists.
+- `ignored`: explicitly excluded from tracking without deleting saved history.
+
+Disabled registered members remain available for inspection/search but
+are excluded from automatic play recommendations and mail recipients. Pending
+and ignored records do not count as providers. Main/role choices refer directly
+to actual character IDs; ignoring or moving a Main to another group clears that designation.
+
+Per-member retained planning includes `restedMultiplier`, `restedRevision`,
+`resourceBlocker` and **`dungeonReady`**. The latter is only a manual ranking
+signal. It is not a dungeon, quest, clear, drop or Legacy record.
 
 ## Capture and freshness
 
-`SnapshotService` collects through `RQ.Api`; `Snapshot.Apply` merges a single
-section. Valid returned fields update. Missing values retain earlier observations
-and mark the entire section incomplete. A section's `observedAt` advances only
-when every expected field was obtained; `attemptedAt` tracks the attempt.
-If the clock fails, new observations do not inherit an apparently fresh section
-timestamp. Partial section values must not be presented as uniformly current.
+`snapshot.sections` separates progression, rested, location, money, bag capacity
+and professions. Sections carry `complete`, `attemptedAt` and the last successful
+`observedAt`. `lastSeen` does not override source-specific timestamps.
 
-`lastSeen` advances at successful capture checkpoints when the clock is available.
-`lastLogout` is set on synchronous logout capture. If logout progression is unavailable
-or has a zero XP maximum, the remaining API scan is skipped and prior values and
-observation timestamps are preserved; only the logout timestamp advances.
-Pending timer callbacks are
-invalidated on rescan, registration changes, and logout.
+Missing values do not erase valid old values. A failed/partial read marks that
+section incomplete while retaining the last observation. Never-observed values
+are unknown, not zero. Source timestamp regressions produce stale/clock warnings.
+Observed logout times and resting/location evidence are separate from general
+snapshot recency.
 
-The whole-snapshot freshness label is `UNKNOWN` without usable timestamps,
-`CLOCK MISMATCH` for future timestamps, `STALE` at or beyond the configured
-threshold, or `RECENT`. Section completeness and timestamps must also be checked;
-a money update does not make old profession or bag data current.
+Item IDs and profession skill-line IDs are numeric canonical keys. Names/icons
+are optional display metadata and do not add inventory or identify recipes by
+guesswork. Item metadata arrival may refresh a view but cannot create stock.
 
-## Migration and corruption handling
+## Rested and planning state
 
-`Migrations.Prepare` copies both roots, accepts schemas 1 through 5 (or missing version
-on a partial database), fills absent containers, seeds absent provisional
-configuration, validates shapes/values/link consistency, and stamps schema 5.
-It is idempotent and preserves unknown fields and non-nil user configuration.
-It does not fabricate an observation timestamp for schema-1 snapshots.
+`restedState` retains a logout baseline, bounded learned-rate samples and the
+latest login comparison. Estimates require a complete timestamped baseline.
+Cached earlier evidence used at logout is explicitly lower confidence and
+cannot train a rate. Teardown failures preserve complete observations instead
+of replacing them with zero XP maxima or empty profession/bag data.
 
-Only after both prepared roots pass validation does `Database.Initialize`
-publish them. Unsupported schemas and invalid consumed fields disable all
-persistence with explicit diagnostics; neither original root is overwritten.
-Back up both SavedVariables files before upgrading. Schema 1 code cannot read
-newer schemas, so downgrade by restoring that backup, not by changing version numbers.
+Rates, cap, near-cap threshold and level cap are account-wide assumptions.
+Changing relevant mechanics clears calibration without destroying valid baselines.
+`roster[guid].isMain` is exclusive within each realm/ruleset/faction combination.
+The ranking compares group, level, Main on equal levels, then other priority
+signals and GUID. Schema 19 removes pinnedCharacterId, mainLeadLevels,
+leadStartLevel, maxAltLag and their weights. No pin or main-lead tier remains.
 
-Schema 3 adds a validated `settings.window` position, defaulting to a centered
-anchor with zero offsets. Migration preserves already valid positions and repairs
-missing position fields; malformed coordinates or anchors disable writes instead
-of resetting user data. Older roster entries missing only their account snapshot
-receive a record with unknown observations so they remain visible/configurable;
-no level, timestamp, or inventory amount is invented.
+## Native professions, supplies and goals
 
-The native window clamps itself to the screen when restored. UI frame references,
-selected tabs/rows, drafts, minimap widgets, and refresh callbacks are runtime-only;
-they are never written to SavedVariables. The minimap launcher has a fixed
-lower-left anchor and adds no persistence fields.
+Profession observations contain skill-line ID, name, primary/secondary kind,
+skill and trained maximum, with section-level completeness and time.
+Recipe snapshots retain owned per-profession observations, learned status,
+difficulty, reagents, skill-up/output information and acquisition evidence when
+available. Unsupported/partial scans do not replace good data with empty lists.
 
-## Planning and rested state (schema 4)
+`record.supplies` retains:
 
-`settings.planning` defaults come from `Data/DefaultPolicies.lua`. Rates are **levels
-per hour**, `capLevels` is levels of XP, and `nearCapRatio` is a fraction of that cap.
-The Planning UI displays these as percentages. Numeric settings, positive ascending
-milestone arrays, bounded finite signed weights, and optional pin IDs are validated.
-Unknown extension fields remain preserved. Initial mechanics are unverified.
+- `needs[itemId]`: explicit minimum stock targets.
+- `goals[professionId]`: selected observed recipe and target skill.
+- `reserves.potions` and `reserves.bandages`: separate item-ID stock floors.
 
-Members have `restedMultiplier = 1`, `restedRevision = 0`, `resourceBlocker = false`,
-and `dungeonReady = false`. The multiplier affects accumulation rate, not the
-global cap. The boolean signals are manually configured, not observed quest or
-inventory state. Resetting calibration increments the revision and clears both
-learned samples and the old baseline.
+Supplies are independently mirrored for the active character.
+Automatic one-craft orange groceries are **derived**, not saved as manual needs:
+eligible learned orange recipes require complete reagents, positive skill-ups and
+observed skill below cap. A goal replaces the same recipe's automatic allowance;
+other eligible recipe allowances remain. Shared materials sum, then overlapping
+manual floors use a maximum. Stale provenance remains visible.
 
-Each character has:
+The orange picker and explicit goals are retained native-recipe workflows, not
+guide steps or a next-20 plan. No guide catalog, source approval, guide compiler
+or guide-based plan is part of schema 16's active contract.
 
-```lua
-restedState = {
-    calibration = { profile = "", inside = {}, outside = {} },
-    -- Optional logout: at, level, xp, xpMax, restedXp, wasResting,
-    --                  multiplier, revision, profile, cached, observedAt
-    -- Optional logoutReason: explanation when no baseline can be built
-    -- Optional comparison: at, accepted, reason, estimated, actual, error, observedRate
-}
-```
+### Profession intent and advice
 
-A profile identifies global rates/cap/maximum level and member multiplier/revision.
-Only eight numeric samples per location and the latest comparison are retained.
-Calibration records **base** rates; the member multiplier is applied when estimating.
-Profile changes reset learned rates. Changed global mechanics retain the observed
-baseline for estimates but reject learning across that change.
+`professionIntent` stores focus, preferences/exclusions and optional intended
+primary choices separately from learned professions. It never counts as a
+trained skill or provider. Learned choices cannot be removed by exclusions.
+Advice uses confirmed free slots and same-realm member coverage; unknown scans
+do not become empty professions.
 
-Normally, complete progression/rested/location sections observed at the exact logout
-timestamp create a baseline. Since 0.0.6, unavailable/zero-maximum logout progression
-triggers a cached fallback using complete earlier sections. `at` remains the logout
-time; `observedAt` is the oldest required section's actual timestamp, and `cached`
-marks the added uncertainty. Cached baselines are always LOW confidence and cannot
-train rates. Section timestamps are not relabelled as fresh. Missing, incomplete,
-or future-dated required evidence still prevents baseline creation; `logoutReason`
-preserves the explanation. A missing logout clock never reuses an old baseline.
-These optional fields are backward-compatible within schema 4.
+`settings.professionLag` controls the `min(5 * level, ceiling)` benchmark,
+secondary opt-ins and optional primary-deficit ranking. Default ranking is off;
+the default ceiling 300 is an assumption, not a confirmed universal client rule.
+Explicit goal targets remain independent of this benchmark.
 
-Pre-schema-4 snapshots can seed a baseline only from exact logout observations
-with `lastSeen == lastLogout`; schema 4 never recreates a consumed baseline during
-migration, and migration does not invent a cached fallback.
+## Inventory, personal bank and bag plans
 
-The first successful identity reconciliation of a login starts session history and
-consumes the baseline, comparing newly captured rested XP when available. Learning
-requires an interval of at least 300 seconds, unchanged level/XP/XPMax, complete
-login observations, unchanged profile, positive gain and no configured cap censoring.
-Ignored logins discard the baseline without capture. Rescans do not recalibrate.
-The next synchronous logout establishes the next baseline. Crashes may leave no
-usable logout evidence; the result is unknown, not invented offline accumulation.
+`inventory.bags`, `.bank` and `.mail` each retain source time, completeness and
+item counts/evidence. Counts from distinct sources must not be silently summed
+when coherence is unproven. Bound/reserved items remain searchable even when
+not transferable. Search does not mutate stock.
 
-`PriorityEngine.Evaluate(account, records, settings, context)` is pure and uses the
-repository's dot-call convention. Explicit context supplies time, active ID and live
-API values; the engine does not fetch time or call game APIs. It returns ordered
-recommendations (ID, score, tier, confidence, two/three reasons, estimate), an error
-slot, estimates keyed by ID, and global warnings. Tiers precede score, then stable
-character ID breaks ties. The planning service supplies API context, text output,
-and persistence orchestration; the Today panel only builds a view model.
+Bag observations include equipped regular-bag capacity and item/output evidence
+needed by bag planning. Ready upgrades use carried bags only. Cross-character
+crafting needs observed transferable output, complete reagents and supported
+capacity/quantity. Preliminary crafts expand only known learned conversions.
+Plans are derived and do not persist delivery promises.
 
-## Full names and supplies (schema 5)
+Personal-bank snapshots require paired coherent bag/bank scans while the bank
+is accessible. Incomplete/interrupted transfers cannot credit duplicate stock.
+Older bank counts without coherence remain unconfirmed discovery evidence.
+Verified owner stock covers materials with a withdrawal prerequisite; bank
+transfer proposals do not credit recipients before withdrawal and a new proposal.
 
-`identity.displayName` prefers the unmodified name returned by the client.
-`identity.fullName` is an optional explicit user override. Display/recipient
-selection uses the override first, but GUID identity is never rekeyed by a display
-edit. A name API's realm return is not concatenated as a surname. Fallback IDs use
-the actual API name, not planned labels; unavailable unmodified names cannot
-establish a surname, so `/rq fullname` and reportable API evidence remain available.
+Per-instance locked-container tooltip evidence is used for Rogue routing and
+exact attachment selection. It is not the container API's temporary busy flag.
+Missing tooltip/localization evidence is unknown; neither opening skill nor
+future unlocking success is inferred.
 
-`inventory.bags.items[itemId] = count` stores bag totals. `tradable[itemId]` counts
-only explicitly unbound, unlocked stacks. `details[itemId]` optionally stores name,
-class and subclass IDs; `equipped[bagIndex]` stores regular equipped bag sizes.
-Empty/malformed/failed scans retain old counts, mark the source incomplete and
-save `error`; incomplete sources cannot supply mail allocations. Bank/mail are
-untouched. Bag counts are not scanned during final logout teardown.
+## Mail evidence
 
-`recipes.professions[professionId]` holds `{name, complete, scannedAt, recipes}`.
-Each recipe ID maps to `{name, learned, reagents, reagentsComplete, skillUps,
-source?, sourceItem?}`. `reagents[itemId]` contains per-craft quantities. Required
-slots with alternative reagent choices are explicitly incomplete rather than
-choosing a quality/currency/item arbitrarily. A learning-item mapping requires one
-unique acquisition-linked item identified as a recipe by the item API; currencies
-and ambiguous alternatives are not selected. Opening one profession never marks all professions known;
-the outer `recipes.complete` remains false. No shared/guild catalog is recorded as
-the player's learned list.
+The account mail ledger is bounded to 500 shipment records, with explicit failure
+when full. Eligible entries identify unique same-realm sender/recipient GUIDs,
+item quantities, attempt/success/confirmation evidence and timestamps.
+COD/non-roster sends cannot create spendable recipient credit.
 
-`supplies.needs[itemId]` is a configured minimum stock target.
-`supplies.goals[professionId] = {recipeId, targetSkill}` is the selected recipe for
-a skill goal. Estimated crafts are `ceil(max(0, targetSkill - observedSkill) /
-skillUps)`. Reagent requirements sum across goals, then combine with manual stock
-targets by maximum, not addition. This is an estimate: skill-ups can fail. No
-optimal Forever guide or acquisition location is invented.
+Observed success is uncertain by default. User confirmation or exact-build
+verification can establish provisional pending coverage, not delivery/collection.
+Build changes invalidate automatic confirmation opt-in.
 
-Groceries and mail proposals are computed, not persisted. Bag stock subtracts from
-targets; stale/incomplete evidence stays visible. Sender reserves and each proposal
-decrease the available allocation pool, with stable destination and item-ID order.
-Mail/in-transit inventory is unknown and not credited. Proposals do not execute any
-protected action or edit the client mail form. Manual review remains required.
+Full inbox/bag coherence and unique reconciliation prevent duplicate pending/
+inbox coverage. Manual take evidence plus attachment removal/carried gains can
+confirm partial/full collection. Interrupted, stale, returned or ambiguous mail
+remains uncertain. Cached active-character mail needs verification on a new login.
+Pending/inbox stock is neither craft-ready nor donor stock.
+
+Closing a shipment stops credit without claiming collection. Pruning removes
+closed/failed/collected history only. Draft attachments are not inventory credit.
+No configuration export includes shipment or inbox observations.
+
+## Retired activity state
+
+Schema 19 removes `record.activity` (including the current-character mirror) and
+`RQDB.checklists`. It preserves `snapshot.money` and its observation timestamp,
+inventory, recipes, groceries, profession intent, mail and rested evidence.
+There are no activity counters, monthly ledgers or generated session lists.
+
+## Logistics configuration
+
+`settings.logistics.categories` holds explicit item-ID sets and ordered unique
+recipient GUIDs for herbs, leather, food, engineering and blacksmithing.
+No category membership is inferred from item names. Retained sender stock floors
+and trade eligibility checks precede transfers.
+
+`settings.logistics.cooks[groupKey] = characterGUID` stores at most one
+Cooking/Fishing assignee per combination. Selection replaces only that key.
+The assignee must currently be registered, enabled and in that group to be used;
+stored assignments become dormant if those conditions cease to hold. There is
+no requirement to have already learned the professions. Config imports reject
+dangling exported GUID references; runtime use also requires a matching realm.
+
+`Data/CookingItems.lua` is a canonical ID allowlist of raw meat/shellfish/fish.
+Explicitly classified `food` IDs also opt in. Unknown IDs, arbitrary name matches,
+prepared food and unrelated consumables are not inferred to be raw ingredients.
+Eligible carried surplus goes to the cook after sender reserves/local bag
+upgrades/priority bag materials, but before other recipients' groceries and
+surplus routes. Verified bank surplus produces withdrawal prerequisites only.
+
+## Configuration transfer
+
+The transfer format version and SavedVariables schema are distinct. Current
+exports require schema 19-compatible configuration. **Old-schema exports must
+be replaced with a fresh post-upgrade export**, not imported or hand-edited.
+
+Exports contain retained settings, policies, actual registration/roster choices,
+supplies/intent. They exclude snapshots,
+recipes, inventories, rested evidence and mail history.
+
+Import is replacement after strict validation, preview and explicit confirmation.
+The minimap angle is included. Import/rollback refresh its native position only
+while the button remains anchored to the minimap, never when a drawer owns it.
+Omitted character records retain observations but become pending with empty
+supplies/default intent. Rollback restores configuration against current
+observations, including undoing later configuration edits. Preview and rollback
+exist only until reload/logout.
+
+Bounds include 256 KiB and 200 characters; they constrain transfer documents,
+not the number of registered roster members. Adler-32 detects corruption, not
+authenticity. Character references are exact IDs, not guessed name matches.
+
+## Migration and recovery
+
+Schema 16's removal migration is idempotent and operates on copies of both roots.
+It removes retired data only:
+
+- `plannedRoster` and retired roster-entry `plannedName`, `claimedBy`, `slotId`.
+- `settings.gear`, including retired per-character advisor profiles.
+- `progress`, the retired dungeon/Legacy ledger.
+
+Retain registered characters, registration status, roles, main choice, enabled/
+planning flags (including `dungeonReady`), retained settings, snapshots, supplies/
+goals/reserves, recipes, inventory, rested state and intent
+and mail tracking. Do not infer that removing a slot removes its linked actual
+character. Removed ephemeral highlights/arrows require no replacement ledger.
+
+Schema 17 initializes missing `settings.logistics.cooks` to an empty map.
+It validates optional trade identity fields without inventing faction/ruleset
+for old records. Character data, needs, recipes and all retained observations
+remain unchanged. Repeating migration preserves assignments and observations.
+
+Schema 18 initializes a missing `settings.minimapAngle` to 225, preserving an
+existing valid angle. Invalid angles reject both roots without mutation. The
+position is committed after dragging ends (including hide, combat entry or
+logout); no frame-coordinate or drawer-layout data is stored.
+
+Supported older roots proceed through normalization to schema 19. Validation of
+both copies must complete before either original is replaced; unsupported future
+schemas or malformed retained fields disable writes and preserve originals.
+Successful in-memory initialization does not prove client disk persistence.
+
+Back up account and per-character SavedVariables with the client closed before
+upgrading. Retain the backup: old versions do not understand schema 19, and
+configuration exports omit observations. Downgrade only with the matching old
+addon and backup. Never reset SavedVariables to hide a migration error.
+Validate migration/reload/restart with [MANUAL_TEST_PLAN.md](MANUAL_TEST_PLAN.md)
+before considering this release accepted.

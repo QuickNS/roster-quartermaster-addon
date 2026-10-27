@@ -1,369 +1,506 @@
 # Roster Quartermaster
 
 An account-wide roster coordinator for **World of Warcraft: Forever**.
-The design is in [implementation-plan.md](implementation-plan.md).
+See the [implementation plan](implementation-plan.md), [data model](docs/DATA_MODEL.md),
+[beta API notes](docs/BETA_API_NOTES.md), and [acceptance walkthrough](docs/USER_ACCEPTANCE_TESTS.md).
 
-## Current status
+## Current status: 0.0.38
 
-Version `0.0.6` includes Milestone 3 plus the requested recipe/grocery/mail-assistance
-foundation from Milestone 5. It is not the MVP:
+`0.0.38` reorganizes the UI into four tabs with persistent realm and
+ruleset/faction filters. Main is an equal-level tie-breaker within its realm/faction,
+not a lead target. Bags and bank snapshots expand into item rows; search dims
+nonmatches. Professions includes orange recipes, optional Auctionator craft costs,
+editable groceries and a small floating grocery list for Auction House browsing.
+Activity/checklist tracking and pins are removed. Schema 19 migrates saved data
+idempotently. Live-client acceptance of this UI remains pending.
 
-- Lua 5.1-compatible addon entry point and explicit TOC load order.
-- Capability-checked API adapter with visible missing, restricted, and failed API diagnostics.
-- Character GUID/name, realm/class/race, level, XP, rested XP, and resting-state probe.
-- Transactional migrations from schemas 1/2/3/4 to schema 5 and account-wide offline snapshots.
-- Native minimap button with tooltip to open/close the roster dashboard.
-- Movable, scrollable window with Today/Roster/Settings/Planning/Supplies tabs.
-- Copyable diagnostic/roster reports, unmodified full-name capture, and a manual name override.
-- Bag item ledgers, observed profession recipes, recipe-based milestone grocery lists, and manual mail proposals.
-- Offline rested estimates, configurable assumptions, bounded login calibration and manual perk reset.
-- Deterministic play-next recommendations with reasons, confidence, and pin/unpin overrides.
-- Character cards with identity, planned name, role/main, progression, professions, location, and freshness.
-- Main/role configuration, explicit unlink/relink, and offline-member controls.
-- Explicit add/link/ignore registration with a small combat-safe prompt and slash fallback.
-- Five editable provisional roster slots; names never trigger automatic links.
-- Money, location, bag-capacity, and profession observations when APIs expose them.
-- Login/logout/rescan capture plus targeted, debounced XP, resting, zone, bag, and skill events.
-- Per-section timestamps, incomplete-data warnings, and stale offline snapshot labels.
-- Non-destructive rejection of malformed or unsupported-schema SavedVariables.
-- Mocked boot, reload, persistence, and API failure tests.
+The roster is dynamic: explicitly **Add** actual characters or **Ignore** them.
+There is no fixed roster size, planned-slot limit, starter preset, or linking
+workflow. Registered characters retain their main/role choices and observations.
 
-**The 0.0.1 in-game smoke tests passed according to the user on 2026-10-02.**
-The TOC targets interface `16001`, reported from Forever `1.60.1`, build `70170`
-(Oct 1 2026). The report covers installation, diagnostics/rescan, `/reload`, and
-full-restart persistence. Detailed API output and extended failure cases have
-not been individually confirmed. **Schema-5 upgrades, copyable reports, full-name APIs,
-recipe/item scans, mail suggestions, and new UI still require in-client testing.** See [beta API notes](docs/BETA_API_NOTES.md) and the
-[manual test plan](docs/MANUAL_TEST_PLAN.md).
+Previously removed in 0.0.33 (still absent):
 
-Daily checklists, bank/mail contents, in-transit tracking, curated optimized
-Forever profession guides, category-wide routing policies, and configuration
-import/export remain future work. The initial planner uses a user-selected recipe
-and skill target, not an invented optimal leveling route. Session objectives
-remain a later milestone.
+- Planned/fixed rosters, provisional slots, presets and slot links.
+- LOW discard highlights and their bag-space report.
+- Gear advisor profiles, scoring, bag arrows, tooltip advice and editor.
+- Dungeon tracker and Legacy tracking.
+- Profession guides and next-20 leveling paths, including their tooling,
+  import workflow, assets and roadmap items.
 
-## Installation for compatibility testing
+The manual **dungeonReady** planning signal remains: it is a ranking override,
+not a dungeon tracker. Native profession/recipe scans, the orange recipe picker,
+explicit recipe goals and one-craft groceries also remain; they do not require
+or implement a guide.
 
-1. In the running Forever client, obtain its interface/build information:
+### Retained capabilities
 
-   ```text
-   /run if GetBuildInfo then print(GetBuildInfo()) else print("GetBuildInfo unavailable") end
-   ```
+- Roster / Bags and Inventory / Professions / Settings visual workspace, minimap launcher,
+  copyable reports, realm filters and offline character review.
+- Observed live rested XP, explicitly estimated offline rested XP, deterministic
+  play-next ranking, per-group Main tie-breakers and manual planning signals.
+- Native profession skills and recipe scans, profession-lag labels, same-realm
+  profession advice and separately saved profession intent.
+- One craft of each eligible learned orange recipe as automatic groceries,
+  explicit recipe goals, minimum-stock needs and potion/bandage reserves.
+- Visual grocery cards, account-wide bag/bank/mail search, coherent personal-bank
+  snapshots, manual withdrawal prerequisites and source-aware material coverage.
+- Trade-compatible mail proposals, explicitly clicked attachment assistance, shipment
+  observations and mailbox reconciliation. Sending always stays manual.
+- Ready-bag upgrades and observed Tailoring bag-crafting/material plans.
+- Latest observed character gold and safe configuration export/import.
 
-   The observed API output contains version, build, date, and interface number.
-   The current recorded result is `1.60.1 70170 Oct 1 2026 16001`.
+No action automates combat, crafting, equipping, purchasing, sending mail,
+collecting mail, selling, destroying items or selecting characters.
+Opening a report or mailbox does not move items; only an explicit Attach click
+uses the attachment helper.
 
-2. [RosterQuartermaster.toc](RosterQuartermaster.toc) already declares
-   `## Interface: 16001`. If your client reports a different interface number,
-   record the new build and update the header before testing. Do not substitute
-   a guessed value. If the API is unavailable, use the client's
-   documented build information before continuing; do not bypass compatibility
-   restrictions. Record the observation in [BETA_API_NOTES.md](docs/BETA_API_NOTES.md).
-3. Create `Interface/AddOns/RosterQuartermaster/` in the Forever client directory.
-   Copy `RosterQuartermaster.toc`, `Bootstrap.lua`, and all of `Core/`, `Data/`,
-   `Models/`, `Services/`, and `UI/` into it. **When upgrading from 0.0.1, copy the
-   new directories too.** The TOC must be directly inside that directory, not
-   in an extra nested folder.
-4. Enable the addon and log in. Click the **RQ minimap button** or use `/rq`
-   to open the dashboard. Use `/rq diag` for diagnostics.
-5. Follow the manual reload/restart tests. Back up existing SavedVariables before
-   testing beta builds. There is no configuration export/import yet.
+## Installation and upgrade
 
-This addon provides information only. It does not craft, mail, purchase, select
-characters, or automate combat.
+1. Close the client and back up **both account and per-character SavedVariables**
+   for RosterQuartermaster. Keep that backup for downgrade or recovery.
+2. Install the complete addon under
+   `Interface/AddOns/RosterQuartermaster/`, with `RosterQuartermaster.toc` directly
+   inside that directory. Replace the old addon directory so retired runtime
+   files are not left behind; do not delete SavedVariables.
+3. Enable the addon, log in, and use `/rq diag` to inspect load/schema/API status.
+   `/rq` or the **RQ** minimap button opens the dashboard.
+4. Follow the [manual tests](docs/MANUAL_TEST_PLAN.md) before treating this
+   candidate as safe for routine use.
 
-### Troubleshooting a stuck registration command
+Schema 16's idempotent migration removes retired data only: planned-roster and
+slot-link metadata, gear settings, and dungeon/Legacy progress. It retains
+registered characters, registration choices, roles, main designation, retained
+settings, snapshots, inventory/recipe evidence, goals, reserves and mail history.
+Schema 19 additionally removes activity ledgers, checklist decisions, pin and main-lead settings. Both roots are validated before publication.
+Malformed or unsupported schemas disable writes rather than replace originals.
+See [migration details](docs/DATA_MODEL.md#migration-and-recovery).
 
-If `/rq link warrior` stays in the chat input and reports
-`RegistrationPrompt (a nil value)`, the registration UI module did not load.
-Check that the installed addon includes `UI/RegistrationPrompt.lua` and that the
-installed TOC contains that path before `Bootstrap.lua`. Copy the complete
-updated addon, not just individual changed files, then run `/reload`.
-If the file and TOC entry are both present, enable `/console scriptErrors 1` and
-check for an earlier load error.
+Schema 17 adds an initially empty Cooking/Fishing assignment map and optional
+faction/ruleset identity fields without discarding retained data. Old characters
+with unknown faction/ruleset are excluded from transfers until revisited.
 
-Version 0.0.3 makes add/link/ignore independent of that UI module and reports
-its absence in chat and `/rq diag`. It does not reset your saved data. Reinstalling
-the missing module is still necessary to restore the registration window.
+Schema 18 adds the minimap angle, defaulting to the lower-left edge (225 degrees).
+Existing character data and assignments remain intact. Back up SavedVariables
+before upgrading.
 
-### Upgrading and registering
+**Old-schema configuration exports are not upgrade backups and cannot be
+imported as schema 19 configuration. Make a fresh export after a successful
+upgrade.** Export/import does not restore observations. Downgrading requires
+the old addon and its matching pre-upgrade SavedVariables backup.
 
-Back up your account and per-character addon SavedVariables while the client is
-closed before upgrading. Schemas 1 through 4 migrate automatically to schema 5 on login;
-keep the backup if you need to downgrade. Future or malformed schemas disable
-writes without replacing the original data.
+### Registration and identity
 
-On an unknown character, choose **Add as new roster member**, **Link** to an
-available provisional slot, or **Ignore**. You can **Decide later** to hide the
-prompt for this login while keeping a pending snapshot. No popup opens in combat;
-slash commands remain available. If the UI or combat-state API is unavailable,
-use the chat instructions instead.
+On an unknown character, choose **Add as new roster member** or **Ignore this
+character**. `/rq add` and `/rq ignore` provide the same explicit choices;
+`/rq register` reopens registration. Deferring the choice leaves a pending
+character, not a planned roster member. No registration popup opens in combat.
+If the UI is missing, reinstall the complete addon and use the slash commands.
 
-Example on your intended main:
+Fresh installations start empty. Add any number of actual characters as you
+visit them; no preset or profession/class composition is required. Settings
+provides Add / resume, Ignore, Make main and role controls for selected records.
+Ignoring stops tracking without deleting the record; ignoring a main
+member clears that designation. Resume explicitly when desired.
 
-```text
-/rq slots
-/rq link warrior
-/rq roster
-```
+GUIDs are canonical. Names and surnames are display values, not planning keys.
+A normalized actual name-and-realm fallback can be promoted when a GUID becomes
+available; conflicting records are reported, not guessed or silently merged.
+Use exact GUIDs or unambiguous actual names in `[member]` command arguments.
+No command accepts a retired planned-slot selector.
 
-Slot IDs are `warrior`, `priest`, `druid`, `rogue`, and `shaman`. They describe
-editable planning slots, not hard-coded actual characters. For example:
+The adapter prefers unmodified names and handles Forever's observed first-name/
+surname returns separately from realm. Revisit characters and `/rq rescan` to
+refresh incomplete labels. `/rq fullname <full name>` sets an explicit actual-name
+override; update it after a rename. Mail requires a uniquely verified full
+recipient name on the same realm.
 
-```text
-/rq name druid Luna Tick
-```
+### Trade rosters and Cooking/Fishing
 
-GUIDs survive character renames. When GUIDs are unavailable, a normalized actual
-name-and-realm key is used and promoted to the GUID once available. Name-only
-fallbacks cannot reliably reconcile renames; the addon does not guess.
-Conflicting fallback/GUID records are preserved and reported rather than merged.
+The roster starts in the active character's **PvE/PvP + Alliance/Horde** group
+when known. Use the trade-group button for another combination, **All trade
+groups**, or unknown identities. Characters remain in one account database;
+this is a trade boundary and roster view, not a duplicate character record.
+Explicit All filters enable account-wide review. Each realm/faction has its own
+Main; changing a character's realm/faction/ruleset clears its old Main designation
+rather than taking over the destination group's Main.
 
-Ignored characters stop snapshot updates and are omitted from `/rq roster text`.
-They remain visible as ignored in the dashboard so you can resume them without
-editing Lua tables. Existing role configuration and links are retained; ignoring
-the main clears that main designation, and ignoring a pinned character clears its pin.
-Use Add / resume in Settings, `/rq register`,
-or `/rq add` to resume.
+Faction comes from `UnitFactionGroup` on login/rescan, not from names or race
+guesses. Ruleset is read from an explicit PvE/PvP token in the realm name.
+If absent, select the character in **Manage roster** and click **Ruleset**
+to confirm PvE or PvP manually. A realm change clears that fallback; observed
+realm labels take precedence. Unknown/neutral faction never permits trading.
 
-### Using the dashboard
+In **Manage roster**, select an enabled member and click **Assign Cooking/Fishing**.
+This replaces the previous assignment for that combination only. Click
+**Clear Cooking/Fishing assignment** to remove it. A `COOK / FISH` badge marks
+the designated character. Assignment does not learn either profession.
+Ignored, disabled, missing, or moved-out-of-group assignees are not eligible.
 
-- Click the **RQ** button at the lower-left edge of the stock minimap to toggle
-  the window. It has a hover tooltip and uses no external library. Its minimap
-  position is currently fixed.
-- `/rq` also toggles the window (initially Today); `/rq today`, `/rq roster`,
-  `/rq settings`, and `/rq planning` open a specific
-  tab. **`/rq` no longer prints diagnostics; use `/rq diag` for that.**
-- Drag the window background/title to move it. The position is saved account-wide.
-  **Center** or `/rq reset-window` restores the default position.
-- Scroll the Roster tab with the mouse wheel or scrollbar. Cards show offline
-  snapshots as last observed, including incomplete/stale warnings. Rested XP is
-  separately labelled observed live, estimated offline, or unknown.
-- Click **Configure** on a character, or choose a character with Previous/Next
-  in Settings. The selector includes pending and ignored characters.
-- Use Add / resume, Ignore, Make main, and the role-cycle button to configure
-  that character. There is at most one newly selected main; later links do not
-  override that explicit choice.
-- Select a provisional slot separately, edit its planned name and press Enter
-  or Save name, then explicitly link it. Occupied slots cannot be overwritten.
-  To move a linked character to another slot, **Unlink slot** first.
-- Offline configuration changes do not scan, log into, or select that character
-  in the client. **Rescan current** always scans the logged-in character.
-- Close with **Close**, Escape (when native Escape registration is available),
-  `/rq`, or `/rq close`. Entering combat hides the dashboard; it does not reopen
-  automatically afterward. A minimap click during combat shows text guidance.
-- If the stock minimap or native window APIs are unavailable, use `/rq roster text`
-  and the configuration slash commands. Diagnostics report the missing capability.
+Mail suggestions, attachment clicks, bank-transfer advice, transferable bag
+plans, shipment coverage and profession-provider coverage require the same
+known ruleset **and** faction. The existing **same-realm safeguard also remains**:
+cross-realm mail addressing/compatibility is not inferred from a shared ruleset.
+Explicit item routes and grocery needs cannot bypass any of these boundaries.
 
-Hidden dashboards are not rebuilt on snapshot events. Visible updates are
-coalesced, and a focused planned-name draft is not overwritten by live updates.
+## Dashboard
 
-### Rested planning and Today
+The minimap launcher is a named native button (`RQMinimapButton`) so collectors
+that scan minimap children can identify it. It uses a round tracking-button
+border and a circular icon mask when supported. It is layered above the native
+minimap artwork without forcing layering after collection. **Left-drag** around the minimap
+to reposition it; release to save the account-wide angle. A drag does not open
+the dashboard. Ordinary left-click still toggles it. Dragging is disabled in combat.
 
-Today shows the top recommendation and the rest of the ranked roster. Only enabled,
-registered members participate. Each recommendation has two or three reasons and
-a confidence label. Pin next/Unpin override automatic rotation; pins persist across
-reloads and character switches. `/rq pin warrior` resolves a linked slot; actual
-names, actual `Name-Realm`, unique planned names, and exact IDs also work. Ambiguous
-names are rejected with matching IDs, never guessed.
+RQ does not reclaim its position, parent or visibility after a drawer addon
+moves it; use that addon's controls while collected. Reload after upgrading;
+use your collector's rescan/settings if it does not refresh automatically.
+Collectors that support only DataBroker/LibDBIcon registration may need
+additional integration; this release does not claim support for every drawer.
 
-Hard priority order is **pin, near rested cap, main needing lead, manual blocker,
-then weighted rotation**. The default five-level main lead begins only after every
-enabled member has reached level 25 and has a known level. At the configured level
-cap, XP/lead priorities stop. The engine also considers alt lag, approaching
-level/profession milestones, manual dungeon readiness, previous-character session,
-and stale observations. Stale levels used from another member lower confidence;
-stale profession sections do not award milestone credit.
+The four primary tabs are **Roster / Bags and Inventory / Professions / Settings**.
+The realm and ruleset/faction selectors remain above them. The default is the
+active character's group; unknown identity stays in an unknown scope. Empty
+filters stay empty. Select **All realms** and **All trade groups** explicitly to
+review everything. Scope is session-only, shared across tabs and never changes
+which character is actually logged in.
 
-Planning exposes eight global assumptions and a selected-member rate multiplier,
-calibration reset, manual resource-blocker/dungeon-ready toggles, and pin control.
-The initial values are **unverified assumptions**, not Forever facts:
+- **Roster:** suggested order, class, level, rested XP, observed gold and
+  profession-lag highlights. Main is assigned through Details or Manage roster.
+- **Bags and Inventory:** expand each character's bags/bank, review equipped bag
+  sizes and choose Bag upgrades. Search by item name or exact ID; matching rows
+  stay bright and other recorded items remain visible but dimmed. Pages are bounded.
+- **Professions:** orange recipes and materials per craft. Auctionator v1 prices
+  are optional cached copper/unit estimates for the active market only. Missing
+  prices, another realm/faction or an unsupported API show unavailable, not zero.
+  No purchase or crafting action is automated.
+- **Grocery list:** Next owner cycles all/per-character stock review within the
+  filter. Save stock edits an existing minimum; Set item stock opens a numeric
+  item-ID/quantity form for the selected character (zero removes the minimum).
+  Recipe requirements still contribute independently.
+- **Compact list:** a small draggable, scrollable grocery window stays open when
+  the main dashboard closes. It shows missing/target quantities and owners, follows
+  scope changes and refreshes with observations. Counts are cached, not live stock.
+- **Settings:** selected-character controls respect scope. Rested assumptions
+  and export/import are explicitly account-wide settings.
 
-- Inn rate: **0.625% of a level/hour**; outside rate: **0.15625%/hour**.
-- Cap: **150% of a level**; near-cap threshold: **90% of that cap**.
-- Main lead: **5 levels**, starting after everyone reaches **25**.
-- Alt catch-up distance: **10 levels**; configured maximum level: **60**.
+`/rq today` uses recommendation order; `/rq planning` opens Settings.
+`/rq supplies [member]` opens groceries and `/rq bags [query]` opens recorded items.
+These commands do not add primary tabs.
 
-Offline estimates require a complete, timestamped logout observation. Missing
-evidence stays unknown rather than projecting from a possibly mid-session cache.
-If logout APIs have become unavailable or report a zero XP maximum, the final
-scan preserves the earlier snapshot instead of overwriting it with teardown zeros.
-Complete earlier observations can supply a **cached logout baseline**, explicitly
-labelled LOW confidence. Accumulation starts at logout, not the earlier scan.
-Incomplete earlier evidence stays unknown with a specific explanation.
-Logout in an inn and switch to another character to see the estimate. Active
-rested XP comes directly from the game API; it never falls back to cached data.
-Offline estimates are LOW confidence with assumptions/stale baselines, or MEDIUM
-with usable learned rates; they are never exact.
+- Drag the window to move it; its position is saved. **Center** or
+  `/rq reset-window` restores the default.
+- Roster rows show actual names, class/role/level, profession badges, rested
+  values and evidence warnings. Select **Details** without changing the active
+  character or ranking.
+- Realm, sort and status filters operate on registered character views.
+  Previous/Next row and capability-checked keyboard navigation preserve
+  GUID-stable selection. Sorting/filtering does not modify configuration.
+- **Rescan current** always scans the logged-in character, never an offline
+  selection. View state is session-only; refreshes preserve valid scroll positions.
+- Close with **Close**, Escape where supported, `/rq close`, or `/rq`.
+  Entering combat hides the dashboard; it does not reopen automatically.
+- Missing native UI/minimap support has text fallbacks. Use `/rq roster text`,
+  `/rq today text`, and `/rq diag`.
 
-Login compares predicted and actual rested XP and can learn a rate when at least
-five minutes elapsed, level/XP/XP-per-level are unchanged, observations are complete,
-and positive accumulation is below the configured caps. Up to eight samples per
-resting location are averaged, and only the latest comparison is retained.
-Rescan/entering-world events do not calibrate again. `/rq diag` reports sample counts
-and accepted/rejected reasons; Today also shows the last comparison.
-Cached fallback baselines are not used to learn rates because unobserved changes
-before logout could distort calibration.
+Reports include names, realms, GUIDs, item quantities and timestamps. Review them
+before sharing. Copy reports are troubleshooting snapshots, not configuration
+backups; reopen after metadata arrives.
 
-If version 0.0.5 saved an offline character with `0/0` XP and empty money/bag/profession
-data, update the complete addon, revisit that character, and use `/rq rescan` once
-loaded into the world. Verify its live values before switching characters. Lost
-observations cannot be reconstructed from zeros; do not reset SavedVariables.
+## Rested and play-next planning
 
-After a relevant perk change, update the rate multiplier or use **Reset calibration**,
-then log out to establish a new baseline. Perk detection is manual; no Legacy API
-contract is assumed. Changed global mechanics clear learned rates while retaining
-valid observed logout data for estimates under the new assumptions. Blocker and
-dungeon signals are also manual until later inventory/quest milestones.
+Only enabled registered members participate. Within each realm/faction group,
+lower levels are suggested first. Main wins equal-level ties; it never creates
+a level-lead target or prevents the player from choosing another character.
+Among the remaining equal-level ties, rested-cap/resource signals and weighted
+rested XP, milestones, profession lag (if enabled), previous-session and freshness
+signals apply. Exact ties use a stable GUID order. There is no pin override.
+Offline rested values remain explicitly estimated and stale evidence remains labelled.
 
-### Copy reports and full character names
+Initial mechanics are **unverified assumptions**, editable in Planning:
 
-Click **Copy report** or run `/rq copy`. The scrollable text window selects the
-report; press **Ctrl+C** and paste it outside the game. **Select all** selects it
-again. Editing this text never changes saved data. Reports include character
-names, GUIDs, realms, snapshots, and grocery targets: review them before sharing.
-This is a troubleshooting report, not a configuration backup/import format.
-
-The adapter prefers `UnitNameUnmodified("player")` over the UI-modified name.
-The name API's realm return is **never** treated as a surname. GUIDs remain the
-canonical identity, and full names are used in cards, pin lookup, reports and mail
-proposals. `/rq copy` includes the observed outputs of the three name APIs for
-client verification. If the client still returns a shortened name, set an explicit
-override on that character:
-
-```text
-/rq fullname Quick Slam
-```
-
-The override persists until replaced; update it after a rename. Planned slot names
-remain separate intentions and never substitute for actual recipient names.
-
-### Professions, groceries and manual mail assistance
-
-1. Visit each registered character and `/rq rescan` after loading into the world.
-   Bag contents are scanned on login/rescan and debounced bag updates, not per frame.
-2. Open **each profession window**. Ready, owned profession recipe lists are cached
-   independently; linked/guild lists are never recorded as your known recipes.
-   `/rq scan-recipes` retries the open profession. Missing APIs retain old data
-   with an error rather than claiming a successful empty scan.
-3. Use `/rq recipes [member]` to inspect/copy recipe IDs, known/unlearned status,
-   observed reagents, and game-provided acquisition information. Unscanned
-   professions and unavailable acquisition details remain unknown.
-4. Choose a recipe to focus on and a skill milestone:
-
-   ```text
-   /rq goal <profession ID> <recipe ID> <target skill> [member]
-   ```
-
-   Use the IDs from your observed recipe report, not guessed retail recipes.
-   For example, select a Tailoring recipe and target skill 150. Required crafts
-   are estimated from the remaining skill points and API-reported skill-ups
-   (one per craft if unavailable). Skill gains are **not guaranteed**; this is a
-   material estimate, not an optimized guide. Skill and bag updates recalculate
-   shortages. Change the selected recipe as your chosen guide recommends.
-   Target skill 0 clears that profession's goal.
-5. Add independent minimum-stock needs by item ID:
-
-   ```text
-   /rq need 2589 40 priest
-   ```
-
-   This example marks 40 Linen Cloth as the linked Priest's target stock. Verify
-   the item ID in this client. Quantity 0 clears a need. Recipe requirements are
-   summed across goals, then combined with explicit stock targets using the larger
-   amount, avoiding duplicate requirements for the same stock.
-6. Open **Supplies** or `/rq supplies [member]` for the grocery list. It subtracts
-   observed bag stock from targets and displays unknown/stale inventories honestly.
-   Missing/alternative reagent data does not produce guessed material requirements.
-7. Open the mailbox and run `/rq mail`. The assistant proposes item quantities and
-   full recipients for grocery shortages, empty equipped bag slots, and unlearned
-   recipes **when an observed acquisition item link identifies the recipe item**.
-   Unmapped recipe scrolls require an explicit `/rq need` rather than guessing.
-   Bag proposals are for general-purpose bags and empty slots; verify their size.
-
-The sender's own grocery needs, empty bag slots, and identified unlearned recipe
-copies are reserved first. Remaining stock is allocated deterministically between
-recipients without counting the same source stack twice. Bound, locked, and
-unknown-binding stacks are excluded. Ignored characters are not destinations.
-
-**Nothing is attached, addressed, or sent automatically.** Verify the full recipient
-name, realm/faction mail rules, binding, and quantities yourself. These are bag-only
-suggestions: bank, mailbox, auctions, and in-transit items are not counted. Receiving
-characters must collect mail and refresh their bags; otherwise another sender may
-still see an outstanding need. Stale recipient inventories and recipe evidence
-require manual confirmation.
-
-## Commands
-
-| Command | Current behavior |
+| Assumption | Default |
 | --- | --- |
-| `/rq` | Toggle the dashboard, initially Today (text fallback if unavailable). |
-| `/rq today [text]` | Open recommendations, or print them without the UI. |
-| `/rq planning` | Edit rested assumptions, member multiplier, and manual planning signals. |
-| `/rq pin <name\|slot\|ID>` | Pin an enabled member as play-next; ambiguous names are rejected. |
-| `/rq unpin` | Clear the account-wide pin. |
-| `/rq diag` | Print capabilities, registration, schemas, saved section timestamps and observed values. |
-| `/rq copy` | Open selectable diagnostics, roster and grocery text for Ctrl+C. |
-| `/rq fullname <full name>` | Set an explicit actual-name override for the current character. |
-| `/rq recipes [member]` | View/copy observed recipes, IDs, materials and acquisition sources. |
-| `/rq scan-recipes` | Scan the currently open, owned profession window. |
-| `/rq supplies [member]` | Open Supplies, or a member's selectable grocery report. |
-| `/rq need <item ID> <quantity> [member]` | Set minimum stock; quantity 0 clears it. |
-| `/rq goal <profession ID> <recipe ID> <target skill> [member]` | Focus a profession milestone on an observed recipe; skill 0 clears it. |
-| `/rq mail` | Refresh active bags and show manual transfer suggestions. |
-| `/rq rescan` | Refresh the current snapshot; unavailable fields retain their old values with incomplete markers. |
-| `/rq roster` | Open the Roster tab. |
-| `/rq roster text` | Print account snapshots, excluding ignored characters. |
-| `/rq settings` | Open roster configuration controls. |
-| `/rq close` | Close the dashboard. |
-| `/rq reset-window` | Reset saved window position to center. |
-| `/rq main [character ID]` | Make an enabled member the main; defaults to the current character. |
-| `/rq role <role> [character ID]` | Set UNASSIGNED, TANK, HEALER, DPS, HEALER_DPS, or FLEX. |
-| `/rq unlink [character ID]` | Release a provisional link without deleting the character snapshot. |
-| `/rq slots` | List provisional slot IDs, editable planned names, and existing links. |
-| `/rq register` | Reopen registration, including for ignored characters. |
-| `/rq add` | Add or re-enable the current character without guessing a slot. |
-| `/rq link <slot>` | Explicitly link the current character to an available provisional slot. |
-| `/rq ignore` | Stop tracking the current character until explicitly re-enabled. |
-| `/rq name <slot> <planned name>` | Edit a provisional display name, preserving actual identity. |
+| Inn accumulation | 0.625% of one level per hour |
+| Outside accumulation | 0.15625% of one level per hour |
+| Rested cap | 150% of one level |
+| Near-cap threshold | 90% of the configured cap |
+| Configured level cap | 60 |
 
-Diagnostics contain your current character name, GUID, and realm. Review them
-before sharing. Reports do not serialize SavedVariables; grocery/recipe reports can
-include item quantities and profession information.
+Active rested XP is read live. Offline estimates require a complete timestamped
+logout baseline. Missing evidence remains unknown. A failed logout scan can
+preserve a complete earlier observation as a **cached logout baseline**, marked
+LOW confidence and accumulated from logout, not from its earlier scan time.
+Teardown zeros must not overwrite valid data.
 
-Never-observed data is displayed as `unavailable`, not as fabricated
-level/XP/resting state. Failed refreshes retain prior values but mark the affected
-section `INCOMPLETE`, preserving its last successful observation time. A snapshot
-can be recent while an individual section is incomplete or stale. The default
-staleness threshold is 48 hours. Offline rested XP is explicitly **estimated** or
-unknown; cached snapshot values remain separately labelled last observed.
+Login calibration compares predicted and actual rested XP only when elapsed time,
+unchanged level/XP, complete observations and caps permit it. At most eight
+samples per resting location are retained. Cached fallback baselines cannot
+teach rates. Estimates remain estimates even with learned rates.
 
-A successful `GetXPExhaustion` call returning `nil` is provisionally
-interpreted as zero rested XP; this candidate API behavior needs client validation.
-An unavailable or failing function returns unknown rested XP instead.
+Use the member multiplier or **Reset calibration** after a relevant perk change;
+perk detection is manual. Changing mechanics clears learned rates while keeping
+valid observed baselines. **Resource blocker** and **dungeon ready** are manual
+ranking signals only. Neither derives dungeon progress, quests, clears or Legacy
+credits.
 
-## Development and testing
+### Profession lag and advice
 
-The included [.devcontainer](.devcontainer/devcontainer.json) installs Python 3,
-Lua 5.1, Luacheck, and StyLua 2.5.2. In VS Code with the Dev Containers extension,
-run **Dev Containers: Reopen in Container**. Creation runs the Lua tests.
-No Python packages or runtime addon dependencies are required.
+The primary-profession benchmark is `min(5 * level, configured ceiling)`;
+the default ceiling 300 is an assumption. For example, level 21 and skill 81
+gives a 24-point deficit against 105. Skill at its trained cap also gives a
+rank-training warning, not a guarantee that training is available.
 
-To reproduce validation directly with Docker:
+Unknown/incomplete/stale observations do not become zero skills or free slots.
+Secondaries are excluded unless opted in, e.g. `/rq profession-track 185 on`.
+Use `/rq profession-cap 197 225` for a profession ceiling override. Labels do not
+change ranking unless `/rq profession-ranking on [weight]` enables the opt-in
+primary-deficit score; default is off. Explicit goal targets remain separate.
 
-```sh
-docker build -t roster-quartermaster-dev:local .devcontainer
-docker run --rm -v "$PWD:/workspace:ro" -w /workspace roster-quartermaster-dev:local \
-  bash -c 'lua5.1 Tests/run.lua && luacheck Core Data Models Services UI Bootstrap.lua Tests && stylua --check Core Data Models Services UI Bootstrap.lua Tests'
+**Profession advice** in Roster, or `/rq professions [member]`, explains enabled
+same-realm coverage and up to three suggestions for confirmed free primary slots.
+Two learned primaries remain locked; a stale scan requests a rescan, never an
+unlearn action. Advice weighs coverage, companion professions, observed recipe
+demand and soft class/role fit, not profit or globally optimal assignment.
+
+- `/rq profession-focus <balanced|gathering|self-sufficient> [member]`
+- `/rq profession-prefer <ID> on|off [member]`
+- `/rq profession-avoid <ID> on|off [member]`
+- `/rq profession-plan <ID[,ID]|clear> [member]`
+
+Saved profession intent is not a planned character slot or an observed learned
+skill. Learn manually and rescan. Primary IDs include Blacksmithing 164,
+Leatherworking 165, Alchemy 171, Herbalism 182, Mining 186, Tailoring 197,
+Engineering 202, Enchanting 333 and Skinning 393. Secondary skills do not occupy
+primary slots. Reference relationships are not verified Forever trainer/recipe
+or equipment guarantees.
+
+## Native recipes and visual groceries
+
+1. Visit registered characters and `/rq rescan` after the world loads.
+2. Open each owned profession window. `/rq scan-recipes` retries the open window;
+   linked/guild recipe lists are not recorded as owned. Missing APIs preserve
+   old observations with errors, not successful empty scans.
+3. Each complete recipe scan contributes materials for **one craft of every
+   learned orange recipe** with complete reagents, positive skill-ups and
+   observed profession skill below its cap. Shared ingredients sum across
+   recipes/professions. Stale evidence remains visibly uncertain; a new successful
+   scan removes recipes no longer eligible. This is not a next-20 leveling path.
+4. Optionally use **Orange recipes** or `/rq targets [member]` to select a learned
+   orange recipe and explicit target skill. The picker defaults to five more
+   points bounded by the trained cap and requires recent complete observations.
+   It rechecks eligibility when saving.
+5. `/rq goal <profession ID> <recipe ID> <target skill> [member]` sets an explicit
+   goal using an observed recipe. Target 0 clears it. A goal replaces that
+   recipe's one-craft allowance, not other recipes' allowances. Crafts are an
+   estimate: current orange difficulty does not guarantee skill-ups all the way
+   to the target. Rescan and revise the selected recipe yourself.
+6. `/rq need <item ID> <quantity> [member]` adds a minimum-stock target; 0 clears
+   it. For example, `/rq need 2589 40` requests 40 Linen Cloth on the current
+   character, subject to checking the item ID in this client.
+7. **Roster > Grocery list** or `/rq supplies [member]` opens visual Inventory
+   cards. Offline and disabled registered members can be reviewed without making
+   them automatic mail recipients.
+
+Grocery cards show **Target, In bags, Still needed, Withdraw, Collect mail and
+In transit**, with shortages first. Filters cover All, Shortages, Collect /
+incoming, Covered and Unknown. Whole-list counts, bounded pagination, item icons,
+inline recipe details and Full report preserve evidence and unknown quantities.
+Recipe lines include names/IDs, quantities and scan timestamps.
+
+Recipe requirements sum; overlapping minimum-stock needs and reserves use a
+maximum rather than double counting. Bag-crafting budgets retain separate
+requirements. Missing/alternative reagent evidence is never filled by invented
+guide data. Manual needs and goals are not overwritten by automatic groceries.
+
+## Inventory, bank and bag upgrades
+
+`/rq bags Copper` searches observed bags, bank and mail by case-insensitive
+literal name substring. Digits-only queries are exact item IDs, e.g.
+`/rq bags 2770`. `/rq find <query>` prints results without native frames.
+Queries are limited to 128 bytes; pattern characters are literal.
+
+Search includes offline and disabled **registered** members, bound equipment
+and reserves. It excludes pending/ignored records. Owner/source filters, icons,
+quantities, source timestamps and coverage warnings distinguish unknown from
+empty. Bank/mail/carried quantities remain separate. Cross-realm discovery
+never authorizes transfers. Clear search returns to bag upgrades.
+
+### Personal bank
+
+Open the personal bank to refresh it. Paired bag/bank scans must be coherent
+before bank stock covers material needs. Closing the bank early, transfers in
+progress, unsupported containers or partial scans cannot create a known-empty
+bank or duplicate stock. Cached offline contents retain freshness labels.
+Older unconfirmed bank observations are discovery-only until refreshed.
+
+Verified owner bank stock reduces material deficits with a **Withdraw**
+prerequisite. Bank-transfer suggestions require manual withdrawal and a fresh
+mail proposal; they are not recipient credit. Account/guild bank stock is not
+assumed accessible. Only carried items can be attached to mail.
+
+### Bag upgrades and crafting
+
+Inventory bag upgrades, also opened with `/rq bags`, use observed regular equipped
+bag capacities. The backpack, bank and reagent bag are not replacement targets.
+An owner's carried beneficial bag is reserved first, then transferable bags are
+allocated once to same-realm members' smallest bags.
+
+For remaining slots, the planner chooses the largest observed learned
+general-purpose Tailoring bag output; stable GUID/recipe-ID order breaks ties.
+Gray recipes are allowed. Unknown capacity, variable output, binding, reagents
+or stale/incomplete evidence block unsupported assignments.
+
+Material plans show crafter, recipe, craft count and recipients. Known learned
+intermediate recipes can expand shortages into raw materials after existing
+intermediate stock is used. Unobserved conversions stay as intermediate requests.
+Thread and other non-cloth reagents remain included.
+
+Ready bags and their materials precede ordinary grocery requests in mail
+allocation. Craft, mail and equip manually, then rescan. Bags still in mail or
+in transit are not ready upgrades; collect them before acting on renewed craft
+plans. Capacity is not proof of equip eligibility.
+
+## Mail, routing and reserves
+
+`/rq mail` proposes safe trade-compatible transfers, prioritizing ready bags/materials,
+the designated Cooking/Fishing character's raw ingredients, and then other
+grocery shortages before general surplus routing. Sender needs,
+reserves, recipe materials and own bag upgrades remain protected. Unknown
+binding, busy/locked stacks and ambiguous names block unsafe attachment.
+
+General routing uses observed evidence:
+
+- Known raw meat, shellfish and fish item IDs go to the group's Cooking/Fishing
+  character, even without a grocery target and before other recipients' grocery
+  needs or explicit surplus recipient orders. Sender grocery/reserve quantities
+  stay protected. The designated cook keeps their own ingredients instead of
+  bouncing them elsewhere. Verified bank surplus is withdrawal guidance only.
+  Classification is an explicit Classic item-ID list, not a name match or a
+  blanket food/consumable rule. For an unlisted Forever ingredient, explicitly
+  classify its ID using `/rq routing-item food <item ID> on`. This also opts that
+  item into Cooking/Fishing priority; use `off` to remove your classification.
+- Cloth to Tailoring; metal/stone trade goods to Blacksmithing.
+- Unbound, non-busy uncommon BoE weapons/armor to Enchanting as **candidates**.
+  Check upgrades, disenchantability and required skill yourself; there is no gear
+  advisor.
+- Light Feathers (item ID 17056) and surplus names starting exactly with `Scroll:`
+  to the first enabled same-realm Mage. A Mage keeps their own surplus.
+- Bag instances whose tooltip confirms they require unlocking to a same-realm
+  Rogue. Lockpicking skill is not guaranteed; a Rogue keeps their own surplus.
+
+Except for the Cooking/Fishing ingredient priority above, explicit needs and
+configured item routes take priority over general surplus. The item ID remains
+canonical even where a name prefix selects a routing rule. Stale/incomplete
+profession evidence blocks general profession routing. Missing quest/lock/
+binding/classification evidence is not guessed.
+
+Configure optional item-ID categories and ordered recipients:
+
+```text
+/rq routing
+/rq routing-item herbs 2447 on
+/rq routing-priority herbs <member[,member...]>
+/rq reserve potions <item ID> <quantity> [member]
+/rq reserve bandages <item ID> <quantity> [member]
+/rq reserves
+/rq material-totals
 ```
 
-There are no runtime dependencies. Development tools:
+Categories are herbs, leather, food, engineering and blacksmithing; they do not
+infer membership from item names. Quantity 0 clears a reserve. Recipient lists
+use actual members; `clear` removes a configured ordering.
 
-- Lua 5.1 (`lua5.1`, `luac5.1`).
-- Luacheck (tested with 0.25.0 and the devcontainer's 1.1.2).
-- StyLua with Lua 5.1 support (tested with 2.5.2).
+### Explicit attachment clicks
 
-Run from this directory:
+At an open mailbox, **Attach item / Attach all** refresh and revalidate the
+proposal, fill the full recipient and move the exact carried quantity, splitting
+stacks when necessary. **They never click Send.** Outside a mailbox, or with
+`/rq mail text`, the report is read-only.
+
+Attachment requires known out-of-combat state, empty cursor, enough mail slots
+and an unambiguous same-realm recipient. A different existing recipient,
+anonymous attachments or duplicate draft items stop the helper. Unrelated
+same-recipient attachments are preserved. Failures stop the batch, report partial
+progress and attempt to return only the helper's own held item. No background
+retry or follow-up mail is sent. Review realm/faction rules, quantities, subject
+and recipient yourself.
+
+### Shipments and inboxes
+
+`/rq shipments` opens the roster-only ledger. Manually composed sends can be
+observed, but only for uniquely identified same-realm members; COD sends and
+non-roster recipients do not create usable shipment credit.
+
+Default **observation mode** does not treat a captured success as certain
+delivery. After verifying that send, **Confirm sent** or `/rq shipment <ID> sent`
+confirms that specific observed success. Never confirm failures or cancellations.
+Only after the client mail smoke test, `/rq mail-tracking verify` enables
+automatic confirmation for the exact version/build/interface; `off` disables
+it and a build change invalidates the opt-in.
+
+Visit the recipient mailbox. Full loaded inbox/bag scans, unique matching,
+manually observed takes and carried gains reconcile collection conservatively.
+Ambiguous, stale, returned or interrupted evidence stays uncertain. Confirmed
+pending and verified inbox stock may provisionally cover needs, but must be
+collected before crafting; they are never donor stock.
+
+New logins require active-character mailbox verification before cached mail is
+credited. `/rq shipment <ID> close` stops credit without claiming collection.
+`/rq shipment prune` removes only closed/failed/collected history. The ledger
+is bounded to 500 records and reports when full. There is no remote inbox scan.
+
+## Removed activity lists
+
+Activity ledgers, monthly financial summaries, profession-high histories and
+session checklists are no longer tracked. Their commands, runtime modules and
+saved records are removed in schema 19. The latest timestamped wallet snapshot
+is retained for each character; it is not income, profit or a lifetime high.
+
+## Configuration transfer
+
+`/rq export` opens a configuration string; `/rq import` opens paste/preview.
+Review the replacement preview before using its explicit confirmation token with
+`/rq import-confirm <token>`. `/rq import-cancel` cancels;
+`/rq import-rollback` restores the previous configuration until logout/reload.
+
+This replaces configuration, not a merge or a SavedVariables restore. Omitted
+characters keep observations but become pending with default intent/empty supplies.
+Snapshots, recipes, inventory, rested evidence and mail ledgers are
+not imported. Rollback applies configuration against current observations and
+also undoes subsequent configuration edits.
+
+Use only a **fresh schema 19 post-upgrade export**. Old-schema exports require
+re-export after upgrading the source installation, not manual string editing.
+The transfer format has safety bounds (256 KiB, 200 characters) independent of
+the unlimited dynamic roster; checksum validation detects corruption, not trust.
+
+## Useful commands
+
+| Command | Purpose |
+| --- | --- |
+| `/rq`, `/rq close`, `/rq reset-window` | Toggle, close or center the dashboard |
+| `/rq roster [text]`, `/rq today [text]` | Roster or play-next view/text |
+| `/rq settings`, `/rq planning` | Character controls or planning assumptions |
+| `/rq register`, `/rq add`, `/rq ignore` | Explicit registration |
+| `/rq main [character ID]`, `/rq role <role> [character ID]` | Main/role configuration |
+| `/rq diag`, `/rq copy`, `/rq rescan` | Diagnostics, copy report, current snapshot |
+| `/rq fullname <full name>` | Actual-name override |
+| `/rq recipes [member]`, `/rq scan-recipes` | Observed recipes and open-window rescan |
+| `/rq targets [member]`, `/rq supplies [member]` | Explicit orange goal picker and visual groceries |
+| `/rq bags [query]`, `/rq find <query>` | Recorded inventory and source-aware item search |
+| `/rq mail [text]`, `/rq shipments [text]` | Mail proposals and shipment evidence |
+
+Roles are UNASSIGNED, TANK, HEALER, DPS, HEALER_DPS and FLEX. Removed slot,
+gear, bag-space and progress commands are not supported.
+
+## Development, validation and packaging
+
+The runtime has no external dependencies. Direct game APIs belong behind
+`RQ.Api`; planning/routing/estimation logic stays pure and Lua 5.1
+compatible. Use the existing devcontainer toolchain: Lua 5.1, Luacheck, StyLua
+and Python 3 standard-library packaging tests.
+
+From the repository root, the intended checks are:
 
 ```sh
 lua5.1 Tests/run.lua
@@ -371,41 +508,27 @@ luacheck Core Data Models Services UI Bootstrap.lua Tests
 stylua --check Core Data Models Services UI Bootstrap.lua Tests
 find Core Data Models Services UI Tests -name '*.lua' -exec luac5.1 -p {} \;
 luac5.1 -p Bootstrap.lua
+python3 -B -m unittest discover -s Tests -p 'test_package.py'
 ```
 
-Apply formatting with `stylua Core Data Models Services UI Bootstrap.lua Tests`.
-The dependency-free test runner loads the actual TOC order and fakes the game
-environment; it does not establish compatibility with a live Forever client.
-Do not run the fake test environment inside the game.
+Automated validation covers 396 Lua tests and 4 package tests, plus lint,
+formatting and Lua 5.1 syntax. Mock tests do not establish live Forever compatibility. The old guide
+toolchain and guide tests are no longer part of development.
 
-All direct game API access, event-frame creation, chat output, and slash-command
-registration belong in [Core/Api.lua](Core/Api.lua). Database initialization
-waits for this addon's `ADDON_LOADED` event or `PLAYER_LOGIN`.
-See [DATA_MODEL.md](docs/DATA_MODEL.md) for schema and registration invariants.
-
-### Development packaging
-
-The interface number is recorded for the current test build. Stage all runtime
-files, keeping the directory structure:
-
-```text
-RosterQuartermaster/
-  RosterQuartermaster.toc
-  Bootstrap.lua
-  Core/
-  Data/
-  Models/
-  Services/
-  UI/
-```
-
-From the staging directory, run:
+After validation, create a runtime-only archive with:
 
 ```sh
-zip -r RosterQuartermaster-0.0.6.zip RosterQuartermaster
+python3 -B Tools/package.py --output dist/RosterQuartermaster-0.0.38.zip
 ```
 
-Do not ship tests, toolchains, repository metadata, or development configuration.
-This is a development-test archive, not a validated release. Automated
-validation/release workflows and the first MVP version `0.1.0` are scheduled
-for later milestones.
+The archive should contain `RosterQuartermaster/` with the TOC, Bootstrap and
+its runtime files, not Tests, Tools, repository metadata or development assets.
+Verify TOC/namespace/tag agreement and the absence of retired feature assets.
+`0.0.38` is packaged and passes automated validation; live-client acceptance
+remains pending.
+
+Earlier user reports covered the 0.0.1 install/reload/restart smoke test and basic
+carried search, bank scanning and mail tracking in later builds. They are not
+passes for this trade-group release, all API contracts, or extended failure cases.
+The recorded interface target is 16001; verify the actual client build with
+diagnostics and complete the acceptance checklist before release.

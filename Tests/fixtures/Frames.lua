@@ -10,6 +10,7 @@ return function()
             shown = true,
             enabled = true,
             scripts = {},
+            lines = {},
             events = {},
             points = {},
             text = "",
@@ -21,6 +22,39 @@ return function()
         end
         function widget:SetScript(event, callback)
             self.scripts[event] = callback
+        end
+        function widget:HookScript(event, callback)
+            local previous = self.scripts[event]
+            self.scripts[event] = function(...)
+                if previous then
+                    previous(...)
+                end
+                callback(...)
+            end
+        end
+        function widget:GetName()
+            return self.name
+        end
+        function widget:GetParent()
+            return self.parent
+        end
+        function widget:SetParent(newParent)
+            self.parent = newParent
+        end
+        function widget:SetFrameStrata(strata)
+            self.frameStrata = strata
+        end
+        function widget:GetFrameStrata()
+            return self.frameStrata or (self.parent and self.parent:GetFrameStrata()) or "MEDIUM"
+        end
+        function widget:SetFrameLevel(level)
+            self.frameLevel = level
+        end
+        function widget:GetFrameLevel()
+            return self.frameLevel or (self.parent and self.parent:GetFrameLevel() + 1) or 0
+        end
+        function widget:NumLines()
+            return #self.lines
         end
         function widget:RegisterEvent(event)
             self.events[event] = true
@@ -48,6 +82,15 @@ return function()
         end
         function widget:GetWidth()
             return self.width or 100
+        end
+        function widget:GetCenter()
+            return self.centerX or 100, self.centerY or 100
+        end
+        function widget:GetEffectiveScale()
+            return self.scale or 1
+        end
+        function widget:RegisterForDrag(...)
+            self.dragButtons = { ... }
         end
         function widget:GetHeight()
             if self.height then
@@ -95,8 +138,39 @@ return function()
             end
             return lines * 14
         end
-        function widget:CreateTexture()
-            return create("Texture", nil, self)
+        function widget:CreateTexture(nameValue, layer)
+            local texture = create("Texture", nameValue, self)
+            texture.layer = layer
+            return texture
+        end
+        function widget:CreateMaskTexture()
+            return create("MaskTexture", nil, self)
+        end
+        function widget:AddMaskTexture(mask)
+            self.mask = mask
+        end
+        function widget:SetTexture(path)
+            self.texture = path
+            self.portrait = nil
+            return true
+        end
+        function widget:SetTexCoord(...)
+            self.texCoords = { ... }
+        end
+        function widget:SetTextColor(...)
+            self.color = { ... }
+        end
+        function widget:SetVertexColor(...)
+            self.vertexColor = { ... }
+        end
+        function widget:SetDesaturated(value)
+            self.desaturated = value
+        end
+        function widget:EnableKeyboard(value)
+            self.keyboard = value
+        end
+        function widget:SetPropagateKeyboardInput(value)
+            self.propagate = value
         end
         function widget:CreateFontString()
             return create("FontString", nil, self)
@@ -109,6 +183,9 @@ return function()
         end
         function widget:GetVerticalScroll()
             return self.scroll
+        end
+        function widget:SetAlpha(value)
+            self.alpha = value
         end
         function widget:HasFocus()
             return self.focus == true
@@ -135,13 +212,12 @@ return function()
             self.lines[#self.lines + 1] = line
         end
         for _, method in ipairs({
-            "SetFrameStrata",
             "SetClampedToScreen",
             "SetMovable",
             "EnableMouse",
-            "RegisterForDrag",
             "SetAllPoints",
             "SetColorTexture",
+            "SetBackdrop",
             "SetJustifyH",
             "SetJustifyV",
             "EnableMouseWheel",
